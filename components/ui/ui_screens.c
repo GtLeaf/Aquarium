@@ -4,6 +4,7 @@
 #include "species_data.h"
 #include "engine_main.h"
 #include "hal_audio.h"
+#include "hal_display.h"
 #include "esp_log.h"
 #include <string.h>
 #include <time.h>
@@ -124,6 +125,7 @@ static void create_tank_area(void)
 void ui_screen_main_create(void)
 {
     g_main_screen = lv_obj_create(NULL);
+    lv_obj_set_size(g_main_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_obj_set_style_bg_color(g_main_screen, lv_color_black(), 0);
 
     create_status_bar();
@@ -403,6 +405,7 @@ void ui_screen_settings_create(void)
     if (g_settings_screen) return;
 
     g_settings_screen = lv_obj_create(NULL);
+    lv_obj_set_size(g_settings_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_obj_set_style_bg_color(g_settings_screen, lv_color_make(15, 25, 35), 0);
 
     // 标题
@@ -469,6 +472,7 @@ void ui_screen_collection_create(void)
     if (g_collection_screen) return;
 
     g_collection_screen = lv_obj_create(NULL);
+    lv_obj_set_size(g_collection_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_obj_set_style_bg_color(g_collection_screen, lv_color_make(15, 25, 35), 0);
 
     // 标题
@@ -583,7 +587,8 @@ void ui_screen_title_create(void)
     if (g_title_screen) return;
 
     g_title_screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(g_title_screen, lv_color_make(255, 0, 0), 0);  // TEST: pure red background
+    lv_obj_set_size(g_title_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    lv_obj_set_style_bg_color(g_title_screen, lv_color_black(), 0);
 
     // 游戏标题
     g_title_label = lv_label_create(g_title_screen);
@@ -678,6 +683,7 @@ void ui_screen_title_show(void)
     if (!g_title_screen) ui_screen_title_create();
     g_title_visible = true;
     lv_scr_load(g_title_screen);
+    lv_refr_now(lv_display_get_default());
 }
 
 bool ui_screen_title_is_visible(void)
@@ -720,6 +726,7 @@ void ui_ambient_enter(void)
 
     if (!g_ambient_screen) {
         g_ambient_screen = lv_obj_create(NULL);
+        lv_obj_set_size(g_ambient_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
         lv_obj_set_style_bg_color(g_ambient_screen, lv_color_black(), 0);
 
         // 时间显示（左下角）
@@ -843,6 +850,7 @@ void ui_screen_shop_create(void)
     if (g_shop_screen) return;
 
     g_shop_screen = lv_obj_create(NULL);
+    lv_obj_set_size(g_shop_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
     lv_obj_set_style_bg_color(g_shop_screen, lv_color_make(15, 25, 35), 0);
 
     // 标题

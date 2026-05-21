@@ -186,7 +186,6 @@ void hal_display_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
     int offsety1 = area->y1;
     int offsety2 = area->y2;
 
-    // No byte swap needed - LVGL RGB565 buffer matches SH8601 expectation
     esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
 
     lv_display_flush_ready(disp);

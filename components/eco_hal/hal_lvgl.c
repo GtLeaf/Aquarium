@@ -21,11 +21,18 @@ static void lvgl_flush_cb(lv_display_t *display, const lv_area_t *area, uint8_t 
 static void lvgl_touch_cb(lv_indev_t *indev_drv, lv_indev_data_t *data)
 {
     (void)indev_drv;
+    static int call_count = 0;
+    call_count++;
+    if (call_count % 100 == 0) {
+        ESP_LOGI(TAG, "Touch callback called (count=%d)", call_count);
+    }
+
     int16_t x, y;
     if (hal_touch_read(&x, &y)) {
         data->point.x = x;
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
+        ESP_LOGI(TAG, "Touch PRESSED: x=%d, y=%d", x, y);
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
@@ -94,8 +101,8 @@ esp_err_t hal_lvgl_init(void)
     }
     ESP_LOGI(TAG, "Display created OK");
 
-    ESP_LOGI(TAG, "Setting color format to RGB565...");
-    lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
+    ESP_LOGI(TAG, "Setting color format to RGB565_SWAPPED...");
+    lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565_SWAPPED);
 
     ESP_LOGI(TAG, "Setting flush callback...");
     lv_display_set_flush_cb(disp, lvgl_flush_cb);
@@ -106,8 +113,14 @@ esp_err_t hal_lvgl_init(void)
     // 初始化触摸输入设备
     ESP_LOGI(TAG, "Creating input device...");
     indev = lv_indev_create();
+    if (!indev) {
+        ESP_LOGE(TAG, "Failed to create input device");
+        return ESP_ERR_NO_MEM;
+    }
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, lvgl_touch_cb);
+    lv_indev_set_display(indev, disp);
+    lv_indev_enable(indev, true);
     ESP_LOGI(TAG, "Input device created OK");
 
     ESP_LOGI(TAG, "LVGL initialized successfully");
@@ -120,6 +133,7 @@ void hal_lvgl_port_task(void *arg)
     (void)arg;
     ESP_LOGI(TAG, "LVGL task started");
 
+    int loop_count = 0;
     while (1) {
         uint32_t task_delay_ms = lv_timer_handler();
         if (task_delay_ms > 500) {
@@ -127,6 +141,12 @@ void hal_lvgl_port_task(void *arg)
         } else if (task_delay_ms < 5) {
             task_delay_ms = 5;
         }
+
+        loop_count++;
+        if (loop_count % 100 == 0) {
+            ESP_LOGI(TAG, "LVGL task running (loop=%d, delay=%lu)", loop_count, task_delay_ms);
+        }
+
         vTaskDelay(pdMS_TO_TICKS(task_delay_ms));
     }
 }

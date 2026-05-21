@@ -28,7 +28,7 @@ static void popup_create_base(void)
     g_popup_overlay = lv_obj_create(parent);
     lv_obj_set_size(g_popup_overlay, 368, 448);
     lv_obj_set_pos(g_popup_overlay, 0, 0);
-    lv_obj_set_style_bg_color(g_popup_overlay, lv_color_black(), 0);
+    // lv_obj_set_style_bg_color(g_popup_overlay, lv_color_black(), 0);
     lv_obj_set_style_bg_opa(g_popup_overlay, LV_OPA_50, 0);
     lv_obj_set_style_border_width(g_popup_overlay, 0, 0);
     lv_obj_set_style_pad_all(g_popup_overlay, 0, 0);
@@ -38,7 +38,7 @@ static void popup_create_base(void)
     g_popup_panel = lv_obj_create(g_popup_overlay);
     lv_obj_set_size(g_popup_panel, 300, 180);
     lv_obj_center(g_popup_panel);
-    lv_obj_set_style_bg_color(g_popup_panel, lv_color_make(30, 40, 50), 0);
+    // lv_obj_set_style_bg_color(g_popup_panel, lv_color_make(30, 40, 50), 0);
     lv_obj_set_style_radius(g_popup_panel, 12, 0);
     lv_obj_set_style_border_color(g_popup_panel, lv_color_make(0, 150, 200), 0);
     lv_obj_set_style_border_width(g_popup_panel, 2, 0);
@@ -66,7 +66,7 @@ static void popup_create_base(void)
     g_popup_btn = lv_btn_create(g_popup_panel);
     lv_obj_set_size(g_popup_btn, 100, 36);
     lv_obj_set_pos(g_popup_btn, 100, 120);
-    lv_obj_set_style_bg_color(g_popup_btn, lv_color_make(0, 120, 180), 0);
+    // lv_obj_set_style_bg_color(g_popup_btn, lv_color_make(0, 120, 180), 0);
     lv_obj_set_style_radius(g_popup_btn, 8, 0);
 
     lv_obj_t *lbl = lv_label_create(g_popup_btn);

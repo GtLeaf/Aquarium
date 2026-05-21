@@ -66,7 +66,9 @@ static esp_err_t ft3168_read_reg(uint8_t reg, uint8_t *data, size_t len)
 bool hal_touch_read(int16_t *x, int16_t *y)
 {
     uint8_t data[6];
-    if (ft3168_read_reg(FT3168_REG_TD_STATUS, data, 6) != ESP_OK) {
+    esp_err_t ret = ft3168_read_reg(FT3168_REG_TD_STATUS, data, 6);
+    if (ret != ESP_OK) {
+        ESP_LOGD(TAG, "Touch I2C read failed: %d", ret);
         return false;
     }
 
@@ -79,6 +81,8 @@ bool hal_touch_read(int16_t *x, int16_t *y)
     // 解析坐标 (11-bit)
     int16_t raw_x = ((data[1] & 0x0F) << 8) | data[2];
     int16_t raw_y = ((data[3] & 0x0F) << 8) | data[4];
+
+    ESP_LOGI(TAG, "Touch raw: points=%d, x=%d, y=%d", touch_points, raw_x, raw_y);
 
     // 坐标映射到屏幕 (368x448)
     *x = (raw_x * DISPLAY_WIDTH) / 2048;
@@ -93,6 +97,8 @@ bool hal_touch_read(int16_t *x, int16_t *y)
     touch_pressed = true;
     last_x = *x;
     last_y = *y;
+
+    ESP_LOGI(TAG, "Touch mapped: x=%d, y=%d", *x, *y);
 
     return true;
 }

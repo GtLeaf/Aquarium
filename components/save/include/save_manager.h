@@ -14,7 +14,7 @@ extern "C" {
 #define SAVE_MAGIC          0x544F4345  // 'ECOT'
 #define SAVE_VERSION        1
 
-#define AUTO_SAVE_INTERVAL_MS   (5 * 60 * 1000)  // 5分钟
+#define AUTO_SAVE_INTERVAL_MS   (60 * 1000)  // 1分钟
 #define AUTO_SAVE_RETRY_MAX     3
 
 // 前向声明（调用者需包含 species_data.h）

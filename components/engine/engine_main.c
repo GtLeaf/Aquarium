@@ -355,11 +355,6 @@ void engine_tick(void)
         }
     }
 
-    // 自动存档（每 5 分钟或数据变更时）
-    if (s_ctx.dirty) {
-        save_auto_save(&s_ctx.save);
-        s_ctx.dirty = false;
-    } else {
-        save_auto_save_tick(dt_ms, &s_ctx.save);
-    }
+    // 自动存档（每 1 分钟）
+    save_auto_save_tick(dt_ms, &s_ctx.save);
 }
