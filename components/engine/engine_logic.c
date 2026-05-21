@@ -176,7 +176,7 @@ static void apply_shake_effect(struct game_context *ctx)
                     }
                 }
             }
-            ESP_LOGI(TAG, "Shake effect: SCATTER (L1 50%% death)");
+            // ESP_LOGI(TAG, "Shake effect: SCATTER (L1 50%% death)");
             break;
 
         default:

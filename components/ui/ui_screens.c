@@ -286,6 +286,7 @@ static void btn_collection_cb(lv_event_t *e)
 static void btn_back_cb(lv_event_t *e)
 {
     (void)e;
+    ESP_LOGI(TAG, "btn_back_cb");
     ui_on_interaction();
     ui_navigate_home();
 }

@@ -22,19 +22,39 @@ static void lvgl_touch_cb(lv_indev_t *indev_drv, lv_indev_data_t *data)
 {
     (void)indev_drv;
     static int call_count = 0;
+    static int last_log_call = 0;
+    static bool was_pressed = false;
+    static int16_t last_x = 0, last_y = 0;
     call_count++;
-    if (call_count % 100 == 0) {
-        ESP_LOGI(TAG, "Touch callback called (count=%d)", call_count);
-    }
 
     int16_t x, y;
-    if (hal_touch_read(&x, &y)) {
+    bool pressed = hal_touch_read(&x, &y);
+
+    // 每10次调用打印一次，确认回调被LVGL调用
+    if (call_count - last_log_call >= 10) {
+        last_log_call = call_count;
+        ESP_LOGI(TAG, "[cb#%d] pressed=%d x=%d y=%d", call_count, pressed ? 1 : 0, x, y);
+    }
+
+    if (pressed) {
         data->point.x = x;
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
-        ESP_LOGI(TAG, "Touch PRESSED: x=%d, y=%d", x, y);
+        if (!was_pressed) {
+            bool in_start = (x >= 114 && x <= 254 && y >= 320 && y <= 368);
+            ESP_LOGI(TAG, "【按下】cb#%d x=%d,y=%d START=%s", call_count, x, y, in_start ? "Y" : "N");
+        } else if (x != last_x || y != last_y) {
+            ESP_LOGI(TAG, "【移动】cb#%d x=%d,y=%d", call_count, x, y);
+        }
+        last_x = x;
+        last_y = y;
+        was_pressed = true;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
+        if (was_pressed) {
+            ESP_LOGI(TAG, "【抬起】cb#%d (%d,%d)", call_count, last_x, last_y);
+        }
+        was_pressed = false;
     }
 }
 
@@ -121,7 +141,7 @@ esp_err_t hal_lvgl_init(void)
     lv_indev_set_read_cb(indev, lvgl_touch_cb);
     lv_indev_set_display(indev, disp);
     lv_indev_enable(indev, true);
-    ESP_LOGI(TAG, "Input device created OK");
+    ESP_LOGI(TAG, "Input device created OK (indev=%p)", (void*)indev);
 
     ESP_LOGI(TAG, "LVGL initialized successfully");
     ESP_LOGI(TAG, "========================================");
@@ -144,7 +164,18 @@ void hal_lvgl_port_task(void *arg)
 
         loop_count++;
         if (loop_count % 100 == 0) {
-            ESP_LOGI(TAG, "LVGL task running (loop=%d, delay=%lu)", loop_count, task_delay_ms);
+            // ESP_LOGI(TAG, "LVGL task running (loop=%d, delay=%lu)", loop_count, task_delay_ms);
+        }
+
+        // 独立轮询触摸（绕过LVGL输入设备，用于调试）
+        static int poll_count = 0;
+        static int last_poll_log = 0;
+        poll_count++;
+        int16_t tx, ty;
+        bool tpressed = hal_touch_read(&tx, &ty);
+        if (tpressed || (poll_count - last_poll_log >= 50)) {
+            last_poll_log = poll_count;
+            // ESP_LOGI(TAG, "[POLL#%d] touch=%d x=%d y=%d", poll_count, tpressed ? 1 : 0, tx, ty);
         }
 
         vTaskDelay(pdMS_TO_TICKS(task_delay_ms));
