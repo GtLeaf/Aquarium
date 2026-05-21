@@ -1,0 +1,10 @@
+## IDF Component Manager Manifest File
+dependencies:
+  idf:
+    version: '>=4.1.0'
+  lvgl/lvgl:
+    version: '*'
+    public: true
+  waveshare/esp_lcd_sh8601:
+    version: '*'
+    public: true

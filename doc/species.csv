@@ -1,0 +1,31 @@
+id,name_zh,name_en,category,trophic_level,rarity,base_size,size_cap,grow_factor,hunger_rate,mood_base,vitality_base,eats,alt_eats,produces,light_pref,oxygen_need,nutrient_need,unlock_condition,sprite_stages,coin_value,codex_desc
+1,螺旋藻,Spirulina,plant,1,common,4,12,0.6,0,0,0,,,oxygen,high,0,low,初始解锁,1,0,缸内最基础的绿藻，会随阳光与营养自然繁殖。
+2,苔藓,Moss,plant,1,common,3,8,0.4,0,0,0,,,oxygen,low,0,low,初始解锁,1,0,贴附在沙石上的低光绿苔，缓慢蔓延。
+3,水草丛,WaterGrass,plant,1,common,8,20,0.3,0,0,0,,,oxygen,medium,0,medium,装饰商店购买,2,30,中层水草，提供躲藏点，鱼会在草丛里休息。
+4,黑壳虾,BlackShrimp,invertebrate,2,common,5,15,1.0,8,60,70,1;2,,nutrient,medium,low,medium,初始解锁,3,0,清缸主力，啃食藻类与残渣，繁殖快。
+5,苹果螺,AppleSnail,invertebrate,2,common,4,10,0.8,6,55,60,1;2,,nutrient,low,low,low,事件「漂流瓶」,2,20,搬运工型，缓慢爬行清理缸壁。
+6,灯科鱼,NeonTetra,fish,3,common,6,18,1.2,10,70,80,4;5,1,nutrient,medium,medium,medium,初始解锁,4,50,小型群游鱼，受惊会聚成鱼群。
+7,孔雀鱼,Guppy,fish,3,common,7,22,1.3,11,72,82,4;5,1,nutrient,medium,medium,medium,事件「海风带来」,4,60,色彩斑斓的胎生鱼，性格活泼。
+8,月光鱼,Platy,fish,3,rare,8,24,1.4,12,75,80,4;5,1,nutrient,high,medium,medium,事件「营养雨」,4,120,体色随心情变化的中层鱼，泳姿优雅。
+9,斗鱼,Betta,fish,3,rare,10,28,1.5,14,65,75,4;5,,nutrient,medium,medium,medium,事件「客人造访」,4,150,独行性强，鳍展示华丽，饱食后会鼓鳃。
+10,鲶鱼,Catfish,fish,4,rare,12,32,1.1,16,68,78,6;7,4,nutrient,low,high,high,事件「雷暴日」,4,180,底层捕食者，夜间活跃，食量大。
+11,虹鳉,Rainbowfish,fish,3,rare,9,26,1.4,12,73,82,4;5,1,nutrient,high,medium,medium,事件「下雨日」,4,140,体侧反光彩虹，群游时屏幕会有光带效果。
+12,水晶虾,CrystalShrimp,invertebrate,2,rare,4,12,0.9,8,65,70,1;2,,nutrient,medium,low,low,事件「流星雨」,3,200,半透明红白条纹虾，对水质敏感，是健康指标。
+13,银龙幼鱼,SilverArowanaJ,fish,4,limited,14,40,1.0,18,70,85,6;7;11,4,nutrient,high,high,high,事件「满月之夜」,4,500,大型掠食鱼幼体，最终会长到很大，缸内霸主。
+14,小丑鱼,Clownfish,fish,3,limited,8,24,1.3,11,78,85,4;5,1,nutrient,high,medium,medium,事件「节气访客」,4,300,需与海葵共生才能稳定，仅在特定季节出现。
+15,海葵,Anemone,plant,1,limited,10,20,0.2,0,0,0,,,oxygen,high,0,medium,事件「节气访客」,2,250,触手会随水流摆动，与小丑鱼形成共生加成。
+16,水母,Jellyfish,fish,3,limited,12,28,0.8,10,80,70,1,,,medium,medium,low,事件「生日彩蛋」,4,400,半透明发光（仅限定特效，非SSR），缓慢漂浮。
+17,招财猫鱼,LuckyCatFish,fish,3,limited,9,26,1.2,12,75,80,4;5,,nutrient,medium,medium,medium,事件「节气访客·春节」,4,350,体色金红，被抚摸时会喷出金币粒子。
+18,玻璃猫,GlassCat,fish,3,rare,8,22,1.3,11,68,78,4;5,,nutrient,low,medium,medium,事件「漂流瓶·进阶」,4,160,身体几乎完全透明，只见骨架与内脏轮廓。
+19,鼠鱼,CoryCat,fish,4,common,7,18,1.0,10,72,80,4;5,1,nutrient,low,medium,medium,装饰商店购买,3,80,底栖小型鲶科，会成群觅食，性格温和。
+20,黑魔鬼,BlackGhost,fish,4,limited,12,30,1.0,15,70,82,6;7,4,nutrient,low,high,high,事件「雷暴日·夜间」,4,420,夜行性弱电鱼，靠近时屏幕会有微弱波纹特效。
+21,绿莫斯,JavaMoss,plant,1,common,4,10,0.5,0,0,0,,,oxygen,medium,0,low,事件「漂流瓶」,2,40,易养水草，附着在沉木上形成天然绿荫。
+22,黄金米虾,GoldenShrimp,invertebrate,2,common,4,12,0.9,7,62,68,1;2,,nutrient,medium,low,low,事件「海鸥来访」,3,40,通体金黄的米虾，群养时缸底像撒了金粉。
+23,红绿灯鱼,CardinalTetra,fish,3,common,6,18,1.2,10,72,80,4;5,1,nutrient,medium,medium,medium,事件「海风带来」,4,60,亮蓝红条纹小型鱼，比灯科鱼更艳丽。
+24,珍珠马甲,PearlGourami,fish,3,rare,9,26,1.3,12,74,80,4;5,1,nutrient,medium,medium,medium,事件「微风轻拂·进阶」,4,150,带珍珠斑点的中层鱼，求偶时鳍会展开。
+25,熊猫鼠,PandaCory,fish,4,rare,7,18,1.0,10,75,80,4;5,1,nutrient,low,medium,medium,事件「客人造访」,3,170,黑白配色的小型鼠鱼，群居底栖很可爱。
+26,蓝曼龙,BlueGourami,fish,3,rare,10,28,1.3,13,70,80,4;5,1,nutrient,medium,medium,medium,事件「营养雨」,4,160,蓝色光泽的迷鳃鱼，能直接呼吸空气。
+27,天使鱼,Angelfish,fish,4,rare,11,30,1.2,14,72,80,6;7,4,nutrient,medium,medium,high,事件「下雨日·进阶」,4,200,扁体高鳍的中大型鱼，泳姿优雅如纸鸢。
+28,极乐鸟鱼,Paradisefish,fish,3,limited,9,26,1.3,12,76,82,4;5,,nutrient,high,medium,medium,长尾·养鱼成就「百日守护」,4,520,体色如极乐鸟尾羽般绚烂，需累计养鱼 100 天才会现身。
+29,龙鱼成体,SilverArowanaA,fish,4,limited,18,50,0.6,20,80,90,6;7;13,4,nutrient,high,high,high,长尾·银龙幼鱼成长到 size_cap,4,800,银龙幼体长成的大型掠食鱼，鳞片如月光铠甲。
+30,虎纹鸭嘴,TigerShovelnose,fish,4,limited,16,42,0.9,18,72,85,6;7;10,4,nutrient,low,high,high,长尾·缸体满级 + 雷暴日触发,4,680,虎斑色巨型鲶科，仅在缸生态成熟后的雷夜出没。

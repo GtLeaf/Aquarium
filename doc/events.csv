@@ -1,0 +1,25 @@
+id,event_key,name,category,trigger_type,trigger_condition,daily_cap,cooldown_min,duration_sec,priority,reward_pool,reward_weight,extra_effect,sfx,popup_title,popup_desc,popup_emoji,can_dismiss,unlock_chapter,note
+E001,seagull_visit,海鸥来访,gift,scheduled,daily_first_open=true,1,1440,30,80,box_common;box_rare;creature_l3_common,40;30;30,coins+50,seagull.wav,海鸥送来了礼物,一只海鸥从海面飞过，嘴里叼着一个礼盒。,🕊️,true,1,v0.4:30%概率掉生物
+E002,bottle_drift,漂流瓶,gift,scheduled,interval_h=4,4,240,20,60,box_common;decor_pack;creature_l3_common,50;20;30,nutrient+10,water.wav,海面漂来了瓶子,瓶口塞着一张泛黄的便签，似乎来自远方。,🍾,true,1,v0.4:cap4+30%生物
+E003,sea_breeze,海风带来,creature,scheduled,interval_h=8,3,360,30,70,creature_l3_common;creature_l3_rare,60;40,sun+15,wind.wav,海风带来了新生物,风里夹着海腥味，有什么东西被吹进了缸里。,🌬️,true,1,v0.4:cap3+rare池
+E004,rainy_day,下雨日,environment,weather_api,weather=rain,1,720,300,90,creature_rare;creature_l3_common;nutrient_boost,40;40;20,oxygen+20;rain_anim,rain.wav,缸里下雨了,雨滴打在水面溅起涟漪，鱼儿活力满满。,🌧️,false,1,v0.4:rare池+冷却减半
+E005,thunder_night,雷暴日,environment,weather_api,weather=thunder&hour=18-23,1,1440,600,95,creature_l4_rare;creature_limited;decor_dark,55;25;20,vitality+5;screen_flash,thunder.wav,雷暴之夜,闪电照亮了缸底，似乎惊动了什么深水生物。,⚡,false,2,v0.4:章节2解锁+限定池
+E006,snow_day,雪天,environment,weather_api,weather=snow,1,1440,300,85,decor_winter;creature_rare;coins_boost,40;40;20,sun-10;snow_anim,snow.wav,缸面落雪,雪花在水面缓缓融化，时间仿佛慢了下来。,❄️,false,1,v0.4:rare池
+E007,nutrient_rain,营养雨,environment,charging,charging=true&duration_min=30,2,360,180,75,box_rare;creature_rare;creature_l3_common,30;40;30,nutrient+30,sparkle.wav,营养雨降临,充电的能量化作绿色雨滴洒向缸中。,💚,true,1,v0.4:cap2+概率35%
+E008,meteor_shower,流星雨,environment,scheduled,date=20/4/22 23:00,1,4320,120,100,creature_limited;creature_rare;decor_starry,30;50;20,starry_bg,meteor.wav,流星雨,夜空中划过密集的流星，许个愿吧。,🌠,false,2,v0.4:章节2+限定权重降至30
+E009,full_moon,满月之夜,environment,scheduled,lunar=15&hour=20-23,1,99999,600,90,creature_limited_l4;creature_l4_rare,30;70,moon_glow,moon.wav,满月之夜,月光洒在缸面，深处似乎有什么在浮出。,🌕,false,2,v0.4:限定权重降至30
+E010,solarterm_visit,节气访客,creature,scheduled,date=solar_term,1,99999,300,95,creature_limited_seasonal;creature_l3_rare,40;60,decor_seasonal+1,bell.wav,节气访客来访,二十四节气之客带着应季的礼物造访。,🎋,true,2,v0.4:限定权重降至40
+E011,birthday_egg,生日彩蛋,gift,scheduled,date=user_birthday,1,99999,300,100,creature_limited;decor_birthday,60;40,fireworks_anim,birthday.wav,生日快乐,缸里的小伙伴们为你准备了惊喜。,🎂,true,1,v0.4:限定权重降至60
+E012,guest_visit,客人造访,creature,interaction,steps_today>=5000,1,720,180,75,creature_l3_rare;creature_l3_common;coins_boost,50;30;20,guest_npc_anim,knock.wav,有客人造访,门口传来轻轻的敲击声，似乎有人想送你点什么。,👥,true,1,v0.4:章节1+步数5000+冷却减半
+E013,gentle_breeze,微风轻拂,ambient,scheduled,interval_h=3,4,180,60,30,coins_small;none,40;60,water_ripple,breeze.wav,微风轻拂,水面荡起细细的波纹。,🍃,true,1,环境氛围事件
+E014,morning_glow,晨光,ambient,time,hour=6-8,1,1440,300,40,sun_boost,100,sun+25;warm_filter,morning.wav,晨光初现,第一缕阳光照进缸里，万物苏醒。,🌅,true,1,固定时段氛围
+E015,sunset,日落黄昏,ambient,time,hour=18-19,1,1440,300,40,nutrient_small,100,warm_filter;dim_anim,sunset.wav,日落时分,夕阳把缸景染成温暖的橘色。,🌇,true,1,固定时段氛围
+E016,starry_night,星夜,ambient,time,hour=22-5,1,1440,420,40,none,100,starry_bg;dim_anim,night.wav,夜深了,缸里的鱼儿大多睡了，只有夜行鱼还在游动。,🌌,true,1,固定时段氛围
+E017,visitor_fish,迷路的鱼,creature,low_prob,random=0.20,2,720,120,50,creature_l3_common;creature_l3_rare,60;40,nutrient+5,bubble.wav,一条鱼游进了缸,不知从哪游来一条小鱼，在角落张望。,🐟,true,1,v0.4:概率0.20+cap2
+E018,abandoned_decor,被遗忘的装饰,gift,low_prob,random=0.10,1,1440,90,45,decor_random;creature_l3_common,70;30,coins+20,clink.wav,缸底有发光物,清晨缸底似乎多出了一件小物件。,💎,true,1,v0.4:概率0.10+30%生物
+E019,fish_birthday,鱼的生日,gift,scheduled,creature.born_ts=N*30d,1,99999,180,80,coins_boost;creature_rare;mood_all+10,30;40;30,balloon_anim,party.wav,有只鱼过生日了,你的某只鱼今天满月/满年了，给它点礼物吧。,🎈,true,1,v0.4:rare池
+E020,eclipse,日食,environment,scheduled,date=eclipse,1,99999,300,100,creature_limited;creature_rare;decor_eclipse,40;40;20,eclipse_anim,eclipse.wav,日食发生,缸中突然变暗，像走进了另一个世界。,🌑,false,2,v0.4:章节2+限定权重降至40
+E021,weekly_chest,海鸥的周礼,gift,scheduled,day_of_week=7,1,10080,60,85,box_weekly;creature_rare;creature_limited;decor_random,30;45;10;15,coins+100,bell.wav,海鸥送来周礼,它说这是这周陪你最久的礼物。,🎁,true,1,v0.4:限定权重降至10
+E022,collection_pity,新物种保底,gift,collection_pity,no_new_creature_days>=3,1,4320,90,99,creature_any_new_nontail,100,sparkle_anim,pity.wav,缸里多了新朋友,似乎有只从未见过的小生物悄悄住了下来。,✨,true,1,v0.4:阈值3天+冷却72h+排除长尾
+E023,newbie_week,新手周礼包,gift,scheduled,day_in_range=1-7,1,1440,120,100,creature_any_new_nontail;creature_l3_common;box_rare,55;25;20,coins+40;sparkle_anim,welcome.wav,新手扶持礼包,前 7 天每天派送一份。,🎀,true,1,v0.4新增:D1-D7每天cap1+保底新种偏多
+E024,fortnight_boost,半月扶持,gift,scheduled,day_in_range=8-14&interval_h=24,1,1440,90,100,creature_any_new_nontail;creature_rare;box_rare,45;30;25,coins+60,boost.wav,缸景渐入佳境,第二周派送新种倾向礼盒。,🌱,true,1,v0.4新增:D8-D14每天cap1+保底新种
