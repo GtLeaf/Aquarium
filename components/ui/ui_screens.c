@@ -562,12 +562,19 @@ static bool g_title_visible = false;
 static void btn_start_cb(lv_event_t *e)
 {
     (void)e;
+    ESP_LOGI(TAG, "===== START BUTTON CLICKED =====");
     ui_on_interaction();
     g_title_visible = false;
     hal_audio_play(SOUND_CLICK);
+    ESP_LOGI(TAG, "g_main_screen = %p", (void*)g_main_screen);
     if (g_main_screen) {
+        ESP_LOGI(TAG, "Loading main screen...");
         lv_scr_load(g_main_screen);
+        ESP_LOGI(TAG, "Main screen loaded, setting state to TANK_VIEW");
         engine_set_state(STATE_TANK_VIEW);
+        ESP_LOGI(TAG, "===== START BUTTON HANDLED =====");
+    } else {
+        ESP_LOGE(TAG, "g_main_screen is NULL!");
     }
 }
 
