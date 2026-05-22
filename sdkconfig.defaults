@@ -49,6 +49,9 @@ CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 # FreeRTOS
 CONFIG_FREERTOS_HZ=1000
 
+Task Watchdog - 增大超时防止 LVGL 大面积渲染时触发
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=10
+
 # Main task stack size
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
 

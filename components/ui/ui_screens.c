@@ -562,15 +562,11 @@ static bool g_title_visible = false;
 static void btn_start_cb(lv_event_t *e)
 {
     (void)e;
-    ESP_LOGI(TAG, "===== START BUTTON CLICKED =====");
     ui_on_interaction();
     g_title_visible = false;
     hal_audio_play(SOUND_CLICK);
-    ESP_LOGI(TAG, "g_main_screen = %p", (void*)g_main_screen);
     if (g_main_screen) {
-        ESP_LOGI(TAG, "Loading main screen...");
         lv_scr_load(g_main_screen);
-        ESP_LOGI(TAG, "Main screen loaded, setting state to TANK_VIEW");
         engine_set_state(STATE_TANK_VIEW);
         ESP_LOGI(TAG, "===== START BUTTON HANDLED =====");
     } else {
@@ -806,6 +802,11 @@ void ui_ambient_update(void)
 static lv_obj_t *g_shop_screen = NULL;
 static lv_obj_t *g_shop_grid = NULL;
 static lv_obj_t *g_shop_coin_lbl = NULL;
+static lv_obj_t *g_shop_page_lbl = NULL;
+static uint8_t g_shop_page = 0;
+#define SHOP_ITEMS_PER_PAGE 6
+#define SHOP_TOTAL_PAGES ((MAX_SPECIES + SHOP_ITEMS_PER_PAGE - 1) / SHOP_ITEMS_PER_PAGE)
+static const struct game_save *g_shop_save_ref = NULL;  // 临时引用，用于翻页
 
 // 物种价格表（基础价格）
 static uint16_t s_species_prices[MAX_SPECIES] = {
@@ -816,6 +817,13 @@ static uint16_t s_species_prices[MAX_SPECIES] = {
     500, 500,  // L4A 顶级 500币
     300, 300   // L4B 中大型 300币
 };
+
+// static uint16_t s_species_prices[MAX_SPECIES] = {
+//     50, 50, 50, 50, 50,       // L1 生产者 50币
+//     100, 100, 100, 100,       // L2 食藻者 100币
+//     150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150, 150,  // L3 中型鱼 150币
+//     300, 500, 500, 800, 1000, 1200,  // L4 大型鱼
+// };
 
 static void btn_shop_buy_cb(lv_event_t *e)
 {
@@ -853,61 +861,10 @@ static void btn_shop_buy_cb(lv_event_t *e)
     }
 }
 
-void ui_screen_shop_create(void)
+// 填充当前页的物种卡片
+static void shop_fill_page(const struct game_save *save)
 {
-    if (g_shop_screen) return;
-
-    g_shop_screen = lv_obj_create(NULL);
-    lv_obj_set_size(g_shop_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
-    lv_obj_set_style_bg_color(g_shop_screen, lv_color_make(15, 25, 35), 0);
-
-    // 标题
-    lv_obj_t *title = lv_label_create(g_shop_screen);
-    lv_obj_set_pos(title, 140, 20);
-    lv_label_set_text(title, "Shop");
-    lv_obj_set_style_text_color(title, lv_color_white(), 0);
-    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
-
-    // 返回按钮
-    lv_obj_t *back_btn = lv_btn_create(g_shop_screen);
-    lv_obj_set_size(back_btn, 80, 36);
-    lv_obj_set_pos(back_btn, 20, 20);
-    lv_obj_set_style_bg_color(back_btn, lv_color_make(0, 100, 150), 0);
-    lv_obj_t *lbl = lv_label_create(back_btn);
-    lv_obj_center(lbl);
-    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
-    lv_label_set_text(lbl, "< Back");
-    lv_obj_add_event_cb(back_btn, btn_back_cb, LV_EVENT_CLICKED, NULL);
-
-    // 光合币显示
-    g_shop_coin_lbl = lv_label_create(g_shop_screen);
-    lv_obj_set_pos(g_shop_coin_lbl, 260, 28);
-    lv_obj_set_style_text_color(g_shop_coin_lbl, lv_color_make(255, 200, 0), 0);
-    lv_obj_set_style_text_font(g_shop_coin_lbl, &lv_font_montserrat_14, 0);
-    lv_label_set_text(g_shop_coin_lbl, "$ 0");
-
-    // 商店网格容器
-    g_shop_grid = lv_obj_create(g_shop_screen);
-    lv_obj_set_size(g_shop_grid, 340, 360);
-    lv_obj_set_pos(g_shop_grid, 14, 70);
-    lv_obj_set_style_bg_opa(g_shop_grid, LV_OPA_0, 0);
-    lv_obj_set_style_border_width(g_shop_grid, 0, 0);
-    lv_obj_set_flex_flow(g_shop_grid, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(g_shop_grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
-    lv_obj_set_style_pad_gap(g_shop_grid, 8, 0);
-    lv_obj_clear_flag(g_shop_grid, LV_OBJ_FLAG_SCROLLABLE);
-}
-
-void ui_screen_shop_show(const struct game_save *save)
-{
-    if (!g_shop_screen) ui_screen_shop_create();
-
-    // 更新金币显示
-    if (g_shop_coin_lbl && save) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "$ %lu", (unsigned long)save->photosynth_coins);
-        lv_label_set_text(g_shop_coin_lbl, buf);
-    }
+    if (!g_shop_grid) return;
 
     // 清除旧内容
     uint32_t child_cnt = lv_obj_get_child_cnt(g_shop_grid);
@@ -915,8 +872,18 @@ void ui_screen_shop_show(const struct game_save *save)
         lv_obj_del(lv_obj_get_child(g_shop_grid, i));
     }
 
-    // 填充可购买物种卡片
-    for (int i = 0; i < species_get_count(); i++) {
+    // 更新页码
+    if (g_shop_page_lbl) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d/%d", g_shop_page + 1, SHOP_TOTAL_PAGES);
+        lv_label_set_text(g_shop_page_lbl, buf);
+    }
+
+    int start = g_shop_page * SHOP_ITEMS_PER_PAGE;
+    int end = start + SHOP_ITEMS_PER_PAGE;
+    if (end > species_get_count()) end = species_get_count();
+
+    for (int i = start; i < end; i++) {
         const struct species_def *sp = species_get_by_id(i + 1);
         if (!sp) continue;
 
@@ -924,7 +891,7 @@ void ui_screen_shop_show(const struct game_save *save)
         uint16_t price = (i < MAX_SPECIES) ? s_species_prices[i] : 100;
 
         lv_obj_t *card = lv_obj_create(g_shop_grid);
-        lv_obj_set_size(card, 100, 100);
+        lv_obj_set_size(card, 155, 105);
         lv_obj_set_style_radius(card, 8, 0);
         lv_obj_set_style_bg_color(card,
             unlocked ? lv_color_make(30, 45, 60) : lv_color_make(30, 30, 30), 0);
@@ -936,7 +903,7 @@ void ui_screen_shop_show(const struct game_save *save)
         // 物种名称
         lv_obj_t *name = lv_label_create(card);
         lv_obj_set_pos(name, 4, 4);
-        lv_obj_set_width(name, 90);
+        lv_obj_set_width(name, 140);
         lv_label_set_long_mode(name, LV_LABEL_LONG_DOT);
         lv_obj_set_style_text_color(name,
             unlocked ? lv_color_white() : lv_color_make(100, 100, 100), 0);
@@ -952,25 +919,18 @@ void ui_screen_shop_show(const struct game_save *save)
         snprintf(price_buf, sizeof(price_buf), "$%u", price);
         lv_label_set_text(price_lbl, unlocked ? price_buf : "Locked");
 
-        // 营养级标签
-        lv_obj_t *troph_lbl = lv_label_create(card);
-        lv_obj_set_pos(troph_lbl, 4, 50);
-        lv_obj_set_style_text_color(troph_lbl, get_trophic_color(sp->trophic_level), 0);
-        lv_obj_set_style_text_font(troph_lbl, &lv_font_montserrat_14, 0);
-        const char *troph_name = "?";
-        switch (sp->trophic_level) {
-            case TROPHIC_L1: troph_name = "L1 生产者"; break;
-            case TROPHIC_L2: troph_name = "L2 食藻"; break;
-            case TROPHIC_L3: troph_name = "L3 食肉"; break;
-            case TROPHIC_L4A: troph_name = "L4A 顶级"; break;
-            case TROPHIC_L4B: troph_name = "L4B 中大型"; break;
-        }
-        lv_label_set_text(troph_lbl, troph_name);
+        // 营养级色块指示
+        lv_obj_t *troph_dot = lv_obj_create(card);
+        lv_obj_set_size(troph_dot, 12, 12);
+        lv_obj_set_pos(troph_dot, 130, 6);
+        lv_obj_set_style_radius(troph_dot, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(troph_dot, get_trophic_color(sp->trophic_level), 0);
+        lv_obj_set_style_border_width(troph_dot, 0, 0);
 
         // 购买按钮
         lv_obj_t *buy_btn = lv_btn_create(card);
-        lv_obj_set_size(buy_btn, 60, 24);
-        lv_obj_set_pos(buy_btn, 20, 72);
+        lv_obj_set_size(buy_btn, 60, 26);
+        lv_obj_set_pos(buy_btn, 4, 54);
         lv_obj_set_style_bg_color(buy_btn,
             unlocked ? lv_color_make(0, 150, 100) : lv_color_make(80, 80, 80), 0);
         lv_obj_set_style_radius(buy_btn, 4, 0);
@@ -984,6 +944,119 @@ void ui_screen_shop_show(const struct game_save *save)
             lv_obj_add_event_cb(buy_btn, btn_shop_buy_cb, LV_EVENT_CLICKED, NULL);
         }
     }
+}
+
+static void btn_shop_prev_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_on_interaction();
+    if (g_shop_page > 0) {
+        g_shop_page--;
+        shop_fill_page(g_shop_save_ref);
+    }
+}
+
+static void btn_shop_next_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_on_interaction();
+    if (g_shop_page < SHOP_TOTAL_PAGES - 1) {
+        g_shop_page++;
+        shop_fill_page(g_shop_save_ref);
+    }
+}
+
+void ui_screen_shop_create(void)
+{
+    if (g_shop_screen) return;
+
+    g_shop_screen = lv_obj_create(NULL);
+    lv_obj_set_size(g_shop_screen, DISPLAY_WIDTH, DISPLAY_HEIGHT);
+    lv_obj_set_style_bg_color(g_shop_screen, lv_color_make(15, 25, 35), 0);
+
+    // 标题
+    lv_obj_t *title = lv_label_create(g_shop_screen);
+    lv_obj_set_pos(title, 160, 20);
+    lv_label_set_text(title, "Shop");
+    lv_obj_set_style_text_color(title, lv_color_white(), 0);
+    lv_obj_set_style_text_font(title, &lv_font_montserrat_14, 0);
+
+    // 返回按钮
+    lv_obj_t *back_btn = lv_btn_create(g_shop_screen);
+    lv_obj_set_size(back_btn, 80, 36);
+    lv_obj_set_pos(back_btn, 20, 14);
+    lv_obj_set_style_bg_color(back_btn, lv_color_make(0, 100, 150), 0);
+    lv_obj_t *lbl = lv_label_create(back_btn);
+    lv_obj_center(lbl);
+    lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
+    lv_label_set_text(lbl, "< Back");
+    lv_obj_add_event_cb(back_btn, btn_back_cb, LV_EVENT_CLICKED, NULL);
+
+    // 光合币显示
+    g_shop_coin_lbl = lv_label_create(g_shop_screen);
+    lv_obj_set_pos(g_shop_coin_lbl, 260, 22);
+    lv_obj_set_style_text_color(g_shop_coin_lbl, lv_color_make(255, 200, 0), 0);
+    lv_obj_set_style_text_font(g_shop_coin_lbl, &lv_font_montserrat_14, 0);
+    lv_label_set_text(g_shop_coin_lbl, "$ 0");
+
+    // 商店网格容器（每页 6 项：2列 x 3行）
+    g_shop_grid = lv_obj_create(g_shop_screen);
+    lv_obj_set_size(g_shop_grid, 340, 350);
+    lv_obj_set_pos(g_shop_grid, 14, 56);
+    lv_obj_set_style_bg_opa(g_shop_grid, LV_OPA_0, 0);
+    lv_obj_set_style_border_width(g_shop_grid, 0, 0);
+    lv_obj_set_flex_flow(g_shop_grid, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(g_shop_grid, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
+    lv_obj_set_style_pad_gap(g_shop_grid, 8, 0);
+    lv_obj_clear_flag(g_shop_grid, LV_OBJ_FLAG_SCROLLABLE);
+
+    // 底部翻页区域
+    lv_obj_t *prev_btn = lv_btn_create(g_shop_screen);
+    lv_obj_set_size(prev_btn, 60, 32);
+    lv_obj_set_pos(prev_btn, 60, 410);
+    lv_obj_set_style_bg_color(prev_btn, lv_color_make(60, 60, 60), 0);
+    lv_obj_set_style_radius(prev_btn, 6, 0);
+    lv_obj_t *plbl = lv_label_create(prev_btn);
+    lv_obj_center(plbl);
+    lv_obj_set_style_text_color(plbl, lv_color_white(), 0);
+    lv_label_set_text(plbl, "< Prev");
+    lv_obj_add_event_cb(prev_btn, btn_shop_prev_cb, LV_EVENT_CLICKED, NULL);
+
+    // 页码
+    g_shop_page_lbl = lv_label_create(g_shop_screen);
+    lv_obj_set_pos(g_shop_page_lbl, 165, 418);
+    lv_obj_set_style_text_color(g_shop_page_lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(g_shop_page_lbl, &lv_font_montserrat_14, 0);
+    lv_label_set_text(g_shop_page_lbl, "1/5");
+
+    lv_obj_t *next_btn = lv_btn_create(g_shop_screen);
+    lv_obj_set_size(next_btn, 60, 32);
+    lv_obj_set_pos(next_btn, 240, 410);
+    lv_obj_set_style_bg_color(next_btn, lv_color_make(60, 60, 60), 0);
+    lv_obj_set_style_radius(next_btn, 6, 0);
+    lv_obj_t *nlbl = lv_label_create(next_btn);
+    lv_obj_center(nlbl);
+    lv_obj_set_style_text_color(nlbl, lv_color_white(), 0);
+    lv_label_set_text(nlbl, "Next >");
+    lv_obj_add_event_cb(next_btn, btn_shop_next_cb, LV_EVENT_CLICKED, NULL);
+}
+
+void ui_screen_shop_show(const struct game_save *save)
+{
+    if (!g_shop_screen) ui_screen_shop_create();
+
+    g_shop_save_ref = save;
+    g_shop_page = 0;
+
+    // 更新金币显示
+    if (g_shop_coin_lbl && save) {
+        char buf[32];
+        snprintf(buf, sizeof(buf), "$ %lu", (unsigned long)save->photosynth_coins);
+        lv_label_set_text(g_shop_coin_lbl, buf);
+    }
+
+    // 填充第一页
+    shop_fill_page(save);
 
     lv_scr_load(g_shop_screen);
 }

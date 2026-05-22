@@ -4,6 +4,7 @@
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -173,18 +174,16 @@ void hal_lvgl_port_task(void *arg)
     (void)arg;
     ESP_LOGI(TAG, "LVGL task started");
 
+    esp_task_wdt_add(NULL);
+
     int loop_count = 0;
     while (1) {
-        uint32_t start_ms = pdTICKS_TO_MS(xTaskGetTickCount());
+        
+        esp_task_wdt_reset();
+
         uint32_t task_delay_ms = lv_timer_handler();
-        uint32_t elapsed_ms = pdTICKS_TO_MS(xTaskGetTickCount()) - start_ms;
-
-        if (elapsed_ms > 30) {
-            ESP_LOGW(TAG, "lv_timer_handler took %lu ms (delay=%lu)", elapsed_ms, task_delay_ms);
-        }
-
-        if (task_delay_ms > 50) {
-            task_delay_ms = 50;
+        if (task_delay_ms > 500) {
+            task_delay_ms = 500;
         } else if (task_delay_ms < 10) {
             task_delay_ms = 10;
         }

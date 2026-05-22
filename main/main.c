@@ -69,18 +69,15 @@ void app_main(void)
     ESP_ERROR_CHECK(engine_init());
     ESP_LOGI(TAG, "Engine OK");
 
-    // 3. 启动 LVGL 渲染任务（必须在 ui_init 之前）
-    ESP_LOGI(TAG, "[9/9] Starting LVGL task...");
-    xTaskCreate(hal_lvgl_port_task, "lvgl_task", 8192, NULL, 5, NULL);
-    ESP_LOGI(TAG, "LVGL task started");
-
-    // 等待 LVGL 任务启动
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // 4. 初始化 UI（必须在 LVGL 任务运行后调用）
-    ESP_LOGI(TAG, "Initializing UI...");
+    // 3. 初始化 UI（创建 LVGL 对象树，此时还没有 LVGL 渲染任务运行，线程安全）
+    ESP_LOGI(TAG, "[9/9] Initializing UI...");
     ESP_ERROR_CHECK(ui_init());
     ESP_LOGI(TAG, "UI OK");
+
+    // 4. UI 初始化完成后再启动 LVGL 渲染任务（避免竞态）
+    ESP_LOGI(TAG, "Starting LVGL task...");
+    xTaskCreatePinnedToCore(hal_lvgl_port_task, "lvgl_task", 8192, NULL, 5, NULL, 0);
+    ESP_LOGI(TAG, "LVGL task started");
 
     ESP_LOGI(TAG, "========================================");
     ESP_LOGI(TAG, "All components initialized successfully!");
