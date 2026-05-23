@@ -1,5 +1,6 @@
 #include "hal_imu.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "driver/i2c.h"
 #include <math.h>
 
@@ -16,8 +17,6 @@ static const char *TAG = "hal_imu";
 #define QMI8658_REG_CTRL5       0x06
 #define QMI8658_REG_CTRL7       0x08
 #define QMI8658_REG_ACC_X_L     0x35
-
-static float accel_x = 0, accel_y = 0, accel_z = 0;
 
 esp_err_t hal_imu_init(void)
 {
@@ -45,8 +44,19 @@ static esp_err_t qmi8658_read_reg(uint8_t reg, uint8_t *data, size_t len)
     return ret;
 }
 
+// 摇晃冷却时间（ms），避免连续触发
+#define SHAKE_COOLDOWN_MS 5000
+
 shake_level_t hal_imu_detect_shake(void)
 {
+    static uint32_t last_shake_time = 0;
+    uint32_t now = esp_timer_get_time() / 1000;
+
+    // 冷却期内不检测
+    if (now - last_shake_time < SHAKE_COOLDOWN_MS) {
+        return SHAKE_NONE;
+    }
+
     uint8_t data[6];
     if (qmi8658_read_reg(QMI8658_REG_ACC_X_L, data, 6) != ESP_OK) {
         return SHAKE_NONE;
@@ -59,10 +69,16 @@ shake_level_t hal_imu_detect_shake(void)
     float magnitude = sqrtf(ax * ax + ay * ay + az * az) / 16384.0f;
     float delta = fabsf(magnitude - 1.0f);
 
-    if (delta > 0.8f) return SHAKE_HEAVY;
-    if (delta > 0.5f) return SHAKE_MEDIUM;
-    if (delta > 0.2f) return SHAKE_LIGHT;
-    return SHAKE_NONE;
+    shake_level_t level = SHAKE_NONE;
+    if (delta > 1.0f)      level = SHAKE_HEAVY;
+    else if (delta > 0.8f) level = SHAKE_MEDIUM;
+    else if (delta > 0.3f) level = SHAKE_LIGHT;
+
+    if (level != SHAKE_NONE) {
+        last_shake_time = now;
+        ESP_LOGI(TAG, "Shake detected: level=%d, delta=%.2f, ax=%d, ay=%d, az=%d", level, delta, ax, ay, az);
+    }
+    return level;
 }
 
 void hal_imu_get_tilt(float *pitch, float *roll)

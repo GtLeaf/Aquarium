@@ -270,8 +270,9 @@ bool engine_buy_species(struct game_save *save, uint8_t species_id)
     c->species_id = species_id;
     c->stage = STAGE_JUVENILE;
     c->size = sp->size_base;
-    c->pos_x = (int8_t)(30 + (esp_random() % 60));
-    c->pos_y = (int8_t)(30 + (esp_random() % 60));
+    // 以屏幕中心为原点，半径 100px 内随机生成
+    c->pos_x = (int8_t)(64 + (esp_random() % 100));
+    c->pos_y = (int8_t)(64 + (esp_random() % 100));
     c->hunger = 20;
     c->mood = 90;
     c->state = 0;

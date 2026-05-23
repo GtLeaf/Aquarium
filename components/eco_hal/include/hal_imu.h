@@ -18,7 +18,7 @@ typedef enum {
 // 摇晃效果类型
 enum shake_effect {
     SHAKE_EFFECT_NONE = 0,
-    SHAKE_EFFECT_SCATTER,   // 驱散：L1 生物 50% 死亡
+    SHAKE_EFFECT_SCATTER,   // 驱散：L1 生物 20% 死亡
     SHAKE_EFFECT_FEED,      // 喂食：所有生物饥饿 -30
     SHAKE_EFFECT_OXYGEN,    // 增氧：氧气 +20
     SHAKE_EFFECT_EVENT,     // 触发事件

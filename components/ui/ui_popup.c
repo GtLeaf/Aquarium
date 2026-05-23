@@ -7,7 +7,6 @@
 
 static const char *TAG = "ui_popup";
 
-static lv_obj_t *g_popup_overlay = NULL;
 static lv_obj_t *g_popup_panel = NULL;
 static lv_obj_t *g_popup_title = NULL;
 static lv_obj_t *g_popup_msg = NULL;
@@ -27,27 +26,16 @@ static void popup_btn_cb(lv_event_t *e)
 
 static void popup_create_base(void)
 {
-    if (g_popup_overlay) return;
+    if (g_popup_panel) return;
 
     lv_obj_t *parent = lv_scr_act();
     if (!parent) parent = ui_get_main_screen();
     if (!parent) return;
 
-    // Semi-transparent overlay
-    g_popup_overlay = lv_obj_create(parent);
-    lv_obj_set_size(g_popup_overlay, 368, 448);
-    lv_obj_set_pos(g_popup_overlay, 0, 0);
-    // lv_obj_set_style_bg_color(g_popup_overlay, lv_color_black(), 0);
-    lv_obj_set_style_bg_opa(g_popup_overlay, LV_OPA_50, 0);
-    lv_obj_set_style_border_width(g_popup_overlay, 0, 0);
-    lv_obj_set_style_pad_all(g_popup_overlay, 0, 0);
-    lv_obj_clear_flag(g_popup_overlay, LV_OBJ_FLAG_SCROLLABLE);
-
-    // 弹窗面板
-    g_popup_panel = lv_obj_create(g_popup_overlay);
+    // 弹窗面板（直接挂在屏幕上）
+    g_popup_panel = lv_obj_create(parent);
     lv_obj_set_size(g_popup_panel, 300, 180);
     lv_obj_center(g_popup_panel);
-    // lv_obj_set_style_bg_color(g_popup_panel, lv_color_make(30, 40, 50), 0);
     lv_obj_set_style_radius(g_popup_panel, 12, 0);
     lv_obj_set_style_border_color(g_popup_panel, lv_color_make(0, 150, 200), 0);
     lv_obj_set_style_border_width(g_popup_panel, 2, 0);
@@ -75,7 +63,6 @@ static void popup_create_base(void)
     g_popup_btn = lv_btn_create(g_popup_panel);
     lv_obj_set_size(g_popup_btn, 100, 36);
     lv_obj_set_pos(g_popup_btn, 100, 120);
-    // lv_obj_set_style_bg_color(g_popup_btn, lv_color_make(0, 120, 180), 0);
     lv_obj_set_style_radius(g_popup_btn, 8, 0);
 
     lv_obj_t *lbl = lv_label_create(g_popup_btn);
@@ -90,14 +77,14 @@ static void popup_create_base(void)
 static void popup_show(const char *title, const char *msg, enum popup_type type)
 {
     popup_create_base();
-    if (!g_popup_overlay) return;
+    if (!g_popup_panel) return;
 
     lv_label_set_text(g_popup_title, title ? title : "");
     lv_label_set_text(g_popup_msg, msg ? msg : "");
     g_popup_type = type;
     g_popup_visible = true;
 
-    lv_obj_clear_flag(g_popup_overlay, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_clear_flag(g_popup_panel, LV_OBJ_FLAG_HIDDEN);
     ESP_LOGI(TAG, "Popup shown: type=%d", type);
 }
 
@@ -132,8 +119,8 @@ void ui_popup_show_achievement(const char *name, const char *desc)
 
 void ui_popup_close(void)
 {
-    if (g_popup_overlay) {
-        lv_obj_add_flag(g_popup_overlay, LV_OBJ_FLAG_HIDDEN);
+    if (g_popup_panel) {
+        lv_obj_add_flag(g_popup_panel, LV_OBJ_FLAG_HIDDEN);
     }
     g_popup_visible = false;
     g_popup_type = POPUP_NONE;

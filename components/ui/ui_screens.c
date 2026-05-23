@@ -75,7 +75,7 @@ static void create_status_bar(void)
 
     // 阳光
     g_lbl_sun = lv_label_create(g_status_bar);
-    lv_obj_set_pos(g_lbl_sun, 4, 4);
+    lv_obj_set_pos(g_lbl_sun, 20, 4);
     lv_label_set_text(g_lbl_sun, "☀ 60");
     lv_obj_set_style_text_color(g_lbl_sun, lv_color_make(255, 220, 0), 0);
     lv_obj_set_style_text_font(g_lbl_sun, &lv_font_montserrat_14, 0);
@@ -103,7 +103,7 @@ static void create_status_bar(void)
 
     // 生物数
     g_lbl_creature_count = lv_label_create(g_status_bar);
-    lv_obj_set_pos(g_lbl_creature_count, 310, 4);
+    lv_obj_set_pos(g_lbl_creature_count, 300, 4);
     lv_label_set_text(g_lbl_creature_count, "3/24");
     lv_obj_set_style_text_color(g_lbl_creature_count, lv_color_white(), 0);
     lv_obj_set_style_text_font(g_lbl_creature_count, &lv_font_montserrat_14, 0);
@@ -948,6 +948,7 @@ void ui_screen_shop_create(void)
     lv_obj_set_flex_align(g_shop_grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_gap(g_shop_grid, 8, 0);
     lv_obj_add_flag(g_shop_grid, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(g_shop_grid, LV_DIR_VER);  // 只允许纵向滚动
 }
 
 void ui_screen_shop_show(const struct game_save *save)

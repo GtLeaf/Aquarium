@@ -143,8 +143,8 @@ static void apply_shake_effect(struct game_context *ctx)
     switch (effect) {
         case SHAKE_EFFECT_FEED:
             for (int i = 0; i < ctx->save.creature_count; i++) {
-                if (ctx->save.creatures[i].hunger >= 30) {
-                    ctx->save.creatures[i].hunger -= 30;
+                if (ctx->save.creatures[i].hunger >= 10) {
+                    ctx->save.creatures[i].hunger -= 10;
                 } else {
                     ctx->save.creatures[i].hunger = 0;
                 }
@@ -162,11 +162,11 @@ static void apply_shake_effect(struct game_context *ctx)
             break;
 
         case SHAKE_EFFECT_SCATTER:
-            // L1 生物 50% 死亡
+            // L1 生物 20% 死亡
             for (int i = ctx->save.creature_count - 1; i >= 0; i--) {
                 const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
                 if (sp && sp->trophic_level == TROPHIC_L1) {
-                    if ((esp_random() % 100) < 50) {
+                    if ((esp_random() % 100) < 20) {
                         ctx->save.env.nutrients += sp->food_value;
                         if (i < ctx->save.creature_count - 1) {
                             ctx->save.creatures[i] = ctx->save.creatures[ctx->save.creature_count - 1];
