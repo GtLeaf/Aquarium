@@ -76,6 +76,7 @@ void app_main(void)
 
     // 4. UI 初始化完成后再启动 LVGL 渲染任务（避免竞态）
     ESP_LOGI(TAG, "Starting LVGL task...");
+    hal_lvgl_set_ui_update_cb(ui_update);
     xTaskCreatePinnedToCore(hal_lvgl_port_task, "lvgl_task", 8192, NULL, 5, NULL, 0);
     ESP_LOGI(TAG, "LVGL task started");
 
@@ -86,7 +87,6 @@ void app_main(void)
 
     while (1) {
         engine_tick();
-        ui_update();
-        vTaskDelay(pdMS_TO_TICKS(32));
+        vTaskDelay(pdMS_TO_TICKS(16));
     }
 }

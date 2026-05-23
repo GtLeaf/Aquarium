@@ -221,6 +221,10 @@ void ui_screen_main_update(const struct game_context *ctx)
                 lv_obj_set_style_radius(obj, LV_RADIUS_CIRCLE, 0);
                 lv_obj_set_style_border_width(obj, 1, 0);
                 lv_obj_set_style_border_color(obj, lv_color_white(), 0);
+                lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
+                lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
+                lv_obj_add_event_cb(obj, creature_click_cb, LV_EVENT_CLICKED, NULL);
+                lv_obj_add_event_cb(obj, creature_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
                 g_creature_objs[i] = obj;
             }
 
@@ -239,10 +243,6 @@ void ui_screen_main_update(const struct game_context *ctx)
 
             // 存储索引到 user_data，用于点击识别
             lv_obj_set_user_data(obj, (void *)(intptr_t)i);
-            lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_clear_flag(obj, LV_OBJ_FLAG_SCROLLABLE);
-            lv_obj_add_event_cb(obj, creature_click_cb, LV_EVENT_CLICKED, NULL);
-            lv_obj_add_event_cb(obj, creature_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
 
             // 睡眠态显示半透明
             if (c->state == 1) {

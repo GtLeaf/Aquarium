@@ -1,4 +1,4 @@
-#requires -Version 5
+﻿#requires -Version 5
 <#
 .SYNOPSIS
     ESP32-S3 项目构建、烧录、监视一体化脚本

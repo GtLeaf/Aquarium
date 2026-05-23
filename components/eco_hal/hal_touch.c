@@ -254,14 +254,6 @@ bool hal_touch_read(int16_t *x, int16_t *y)
     }
 
     uint8_t touch_points = data[0] & 0x0F;
-    
-    if (should_log) {
-        // ESP_LOGI(TAG, "[#%d] raw=%02X%02X%02X%02X%02X%02X pts=%d INT=%d",
-        //          read_count,
-        //          data[0], data[1], data[2], data[3], data[4], data[5],
-        //          touch_points,
-        //          gpio_get_level(PIN_TOUCH_INT));
-    }
 
     if (touch_points == 0) {
         touch_pressed = false;
