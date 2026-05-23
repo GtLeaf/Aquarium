@@ -24,7 +24,7 @@ static void popup_create_base(void)
     if (!parent) parent = ui_get_main_screen();
     if (!parent) return;
 
-    // 半透明遮罩
+    // Semi-transparent overlay
     g_popup_overlay = lv_obj_create(parent);
     lv_obj_set_size(g_popup_overlay, 368, 448);
     lv_obj_set_pos(g_popup_overlay, 0, 0);
@@ -99,11 +99,11 @@ void ui_popup_show_offline(uint32_t coins, uint32_t hours, uint8_t creatures)
 {
     char msg[128];
     snprintf(msg, sizeof(msg),
-             "离线了 %lu 小时\n"
-             "%d 只生物存活\n"
-             "获得 %lu 光合币",
+             "Offline for %lu hours\n"
+             "%d creatures survived\n"
+             "Gained %lu photosynthesis coins",
              (unsigned long)hours, creatures, (unsigned long)coins);
-    popup_show("欢迎回来", msg, POPUP_OFFLINE);
+    popup_show("Welcome Back", msg, POPUP_OFFLINE);
 }
 
 void ui_popup_show_reward(const char *title, const char *msg)

@@ -156,6 +156,11 @@ void ui_navigate_collection(void)
 // 返回主界面
 void ui_navigate_home(void)
 {
+    ui_screen_shop_hide();
     ui_screen_settings_hide();
     ui_screen_collection_hide();
+    lv_obj_t *main = ui_get_main_screen();
+    if (main) {
+        lv_scr_load(main);
+    }
 }

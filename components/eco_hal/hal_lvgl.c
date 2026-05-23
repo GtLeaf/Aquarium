@@ -42,7 +42,7 @@ static void lvgl_touch_cb(lv_indev_t *indev_drv, lv_indev_data_t *data)
         data->state = LV_INDEV_STATE_PRESSED;
         if (!was_pressed) {
             bool in_start = (x >= 114 && x <= 254 && y >= 320 && y <= 368);
-            ESP_LOGI(TAG, "【LVGL按下】cb#%d x=%d,y=%d START=%s", call_count, x, y, in_start ? "Y" : "N");
+            ESP_LOGI(TAG, "[LVGL Press] cb#%d x=%d,y=%d START=%s", call_count, x, y, in_start ? "Y" : "N");
         }
         last_x = x;
         last_y = y;
@@ -50,7 +50,7 @@ static void lvgl_touch_cb(lv_indev_t *indev_drv, lv_indev_data_t *data)
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
         if (was_pressed) {
-            ESP_LOGI(TAG, "【LVGL抬起】cb#%d (%d,%d)", call_count, last_x, last_y);
+            ESP_LOGI(TAG, "[LVGL Release] cb#%d (%d,%d)", call_count, last_x, last_y);
         }
         was_pressed = false;
     }
