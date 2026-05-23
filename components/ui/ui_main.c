@@ -5,6 +5,7 @@
 #include "event_system.h"
 #include "achievement_system.h"
 #include "hal_audio.h"
+#include "hal_lvgl.h"
 #include "esp_log.h"
 #include "lvgl.h"
 
@@ -40,6 +41,9 @@ esp_err_t ui_init(void)
     ui_screen_title_create();
     ESP_LOGI(TAG, "Title screen created");
 
+    // 注册触摸交互回调（通知 UI 用户有操作，重置 idle 计时器）
+    hal_lvgl_set_interaction_cb(ui_on_interaction);
+
     // 注册成就解锁回调
     achievement_set_callback(on_achievement_unlocked);
 
@@ -68,8 +72,9 @@ void ui_update(void)
 
     // 状态机：TANK_VIEW <-> AMBIENT_MODE
     if (ctx->state == STATE_TANK_VIEW) {
-        s_idle_timer_ms += 16; // ~60 FPS
+        s_idle_timer_ms += ENGINE_TICK_MS;
 
+        ESP_LOGD(TAG, "s_idle_timer_ms：%d", s_idle_timer_ms);
         // 检查是否需要进入伴侣模式
         if (s_idle_timer_ms >= AMBIENT_ENTER_MS) {
             engine_set_state(STATE_AMBIENT_MODE);

@@ -7,6 +7,10 @@
 extern "C" {
 #endif
 
+// 游戏主循环 tick 间隔（ms），当前 16ms ≈ 60 FPS
+// 如需改为 30 FPS，改为 33 即可
+#define ENGINE_TICK_MS 16
+
 // 游戏状态
 enum game_state {
     STATE_BOOT = 0,

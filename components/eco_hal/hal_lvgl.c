@@ -15,10 +15,16 @@ static lv_indev_t *indev = NULL;
 static uint8_t *buf1 = NULL;
 static uint8_t *buf2 = NULL;
 static void (*s_ui_update_cb)(void) = NULL;
+static void (*s_ui_interaction_cb)(void) = NULL;
 
 void hal_lvgl_set_ui_update_cb(void (*cb)(void))
 {
     s_ui_update_cb = cb;
+}
+
+void hal_lvgl_set_interaction_cb(void (*cb)(void))
+{
+    s_ui_interaction_cb = cb;
 }
 
 static uint32_t lvgl_tick_get_cb(void)
@@ -47,7 +53,7 @@ static void lvgl_touch_cb(lv_indev_t *indev_drv, lv_indev_data_t *data)
         data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
         if (!was_pressed) {
-            ui_on_interaction();
+            if (s_ui_interaction_cb) s_ui_interaction_cb();
             bool in_start = (x >= 114 && x <= 254 && y >= 320 && y <= 368);
             ESP_LOGI(TAG, "[LVGL Press] cb#%d x=%d,y=%d START=%s", call_count, x, y, in_start ? "Y" : "N");
         }
@@ -183,7 +189,7 @@ void hal_lvgl_port_task(void *arg)
 
     esp_task_wdt_add(NULL);
 
-    int loop_count = 0;
+        int loop_count = 0;
     while (1) {
         
         esp_task_wdt_reset();

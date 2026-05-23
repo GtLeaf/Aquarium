@@ -159,7 +159,7 @@ void save_gamesave_init_default(struct game_save *save)
     save->species_unlocked = (1ULL << 0) | (1ULL << 1) | (1ULL << 2) |
                               (1ULL << 5) | (1ULL << 9);
 
-    save->photosynth_coins = 100;
+    save->photosynth_coins = 1000;
     save->tank_level = 1;
     save->play_days_total = 0;
     save->today_events = 0;

@@ -342,12 +342,12 @@ void engine_reset_game(struct game_save *save)
 
 void engine_tick(void)
 {
-    const uint32_t dt_ms = 16; // ~60 FPS
+    const uint32_t dt_ms = ENGINE_TICK_MS;
     s_tick_ms += dt_ms;
     s_ctx.frame_count++;
     s_ctx.state_timer_ms += dt_ms;
 
-    // 生态逻辑每 1 秒执行一次（1000ms / 16ms ≈ 62 帧）
+    // 生态逻辑每 1 秒执行一次（1000ms / ENGINE_TICK_MS ≈ 62 帧）
     static uint32_t ecology_timer = 0;
     ecology_timer += dt_ms;
     if (ecology_timer >= 1000) {

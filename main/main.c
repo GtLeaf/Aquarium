@@ -87,6 +87,6 @@ void app_main(void)
 
     while (1) {
         engine_tick();
-        vTaskDelay(pdMS_TO_TICKS(16));
+        vTaskDelay(pdMS_TO_TICKS(ENGINE_TICK_MS));
     }
 }

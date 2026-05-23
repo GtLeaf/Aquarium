@@ -272,14 +272,12 @@ static lv_obj_t *g_settings_back_btn = NULL;
 static void btn_settings_cb(lv_event_t *e)
 {
     (void)e;
-    ui_on_interaction();
     ui_navigate_settings();
 }
 
 static void btn_collection_cb(lv_event_t *e)
 {
     (void)e;
-    ui_on_interaction();
     ui_navigate_collection();
 }
 
@@ -287,7 +285,6 @@ static void btn_back_cb(lv_event_t *e)
 {
     (void)e;
     ESP_LOGI(TAG, "btn_back_cb");
-    ui_on_interaction();
     ui_navigate_home();
 }
 
@@ -324,8 +321,6 @@ static void creature_click_cb(lv_event_t *e)
     const struct species_def *sp = species_get_by_id(c->species_id);
     if (!sp) return;
 
-    ui_on_interaction();
-
     // 喂食：饥饿 -20，心情 +10
     if (c->hunger >= 20) {
         c->hunger -= 20;
@@ -350,8 +345,6 @@ static void creature_long_press_cb(lv_event_t *e)
     const struct species_def *sp = species_get_by_id(c->species_id);
     if (!sp) return;
 
-    ui_on_interaction();
-
     // 显示生物详情弹窗
     char msg[256];
     const char *stage_name[] = {"Juvenile", "Sub-adult", "Adult", "Giant"};
@@ -375,7 +368,6 @@ static void creature_long_press_cb(lv_event_t *e)
 static void btn_shop_cb(lv_event_t *e)
 {
     (void)e;
-    ui_on_interaction();
     struct game_context *ctx = engine_get_context();
     if (ctx) {
         ESP_LOGI(TAG, "btn_shop_cb: coins=%lu, ctx=%p, save=%p",
@@ -387,7 +379,6 @@ static void btn_shop_cb(lv_event_t *e)
 static void btn_upgrade_cb(lv_event_t *e)
 {
     (void)e;
-    ui_on_interaction();
     struct game_context *ctx = engine_get_context();
     if (ctx) {
         uint32_t cost = engine_get_upgrade_cost(ctx->save.tank_level);
@@ -562,7 +553,6 @@ static bool g_title_visible = false;
 static void btn_start_cb(lv_event_t *e)
 {
     (void)e;
-    ui_on_interaction();
     g_title_visible = false;
     hal_audio_play(SOUND_CLICK);
     if (g_main_screen) {
@@ -577,7 +567,6 @@ static void btn_start_cb(lv_event_t *e)
 static void btn_reset_cb(lv_event_t *e)
 {
     (void)e;
-    ui_on_interaction();
     hal_audio_play(SOUND_WARNING);
     struct game_context *ctx = engine_get_context();
     if (ctx) {
@@ -781,7 +770,7 @@ void ui_ambient_update(void)
     g_ambient_frame++;
 
     // 每秒更新一次时间（1 FPS）
-    if (g_ambient_frame % 60 == 0) { // 假设 60 FPS 调用，实际由调用方控制频率
+    if (g_ambient_frame % (1000 / ENGINE_TICK_MS) == 0) { // 每秒更新一次（基于 ENGINE_TICK_MS）
         time_t now = time(NULL);
         struct tm *tm_info = localtime(&now);
         char buf[16];
@@ -817,8 +806,6 @@ static void btn_shop_buy_cb(lv_event_t *e)
 
     struct game_context *ctx = engine_get_context();
     if (!ctx) return;
-
-    ui_on_interaction();
 
     const struct species_def *sp = species_get_by_id((uint8_t)species_id);
     if (!sp) return;
