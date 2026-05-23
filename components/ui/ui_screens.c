@@ -97,7 +97,7 @@ static void create_status_bar(void)
     // 光合币
     g_lbl_coins = lv_label_create(g_status_bar);
     lv_obj_set_pos(g_lbl_coins, 230, 4);
-    lv_label_set_text(g_lbl_coins, "$ 100");
+    lv_label_set_text(g_lbl_coins, "$ 0");
     lv_obj_set_style_text_color(g_lbl_coins, lv_color_make(255, 200, 0), 0);
     lv_obj_set_style_text_font(g_lbl_coins, &lv_font_montserrat_14, 0);
 
@@ -378,6 +378,8 @@ static void btn_shop_cb(lv_event_t *e)
     ui_on_interaction();
     struct game_context *ctx = engine_get_context();
     if (ctx) {
+        ESP_LOGI(TAG, "btn_shop_cb: coins=%lu, ctx=%p, save=%p",
+                 (unsigned long)ctx->save.photosynth_coins, ctx, &ctx->save);
         ui_screen_shop_show(&ctx->save);
     }
 }
@@ -466,7 +468,7 @@ void ui_screen_settings_hide(void)
 
 // ========== 图鉴界面 ==========
 static lv_obj_t *g_collection_screen = NULL;
-static lv_obj_t *g_collection_grid = NULL;
+lv_obj_t *g_collection_grid = NULL;
 
 void ui_screen_collection_create(void)
 {
@@ -798,7 +800,7 @@ void ui_ambient_update(void)
 
 // ========== 商店界面 ==========
 static lv_obj_t *g_shop_screen = NULL;
-static lv_obj_t *g_shop_grid = NULL;
+lv_obj_t *g_shop_grid = NULL;
 static lv_obj_t *g_shop_coin_lbl = NULL;
 static lv_obj_t *g_shop_page_lbl = NULL;
 static uint8_t g_shop_page = 0;
@@ -806,15 +808,7 @@ static uint8_t g_shop_page = 0;
 #define SHOP_TOTAL_PAGES ((MAX_SPECIES + SHOP_ITEMS_PER_PAGE - 1) / SHOP_ITEMS_PER_PAGE)
 static const struct game_save *g_shop_save_ref = NULL;  // 临时引用，用于翻页
 
-// 物种价格表（基础价格）
-static uint16_t s_species_prices[MAX_SPECIES] = {
-    0,  // ID 0 保留
-    50, 50, 50, 50, 50, 50, 50, 50, 50, 50,  // L1 Producers 50 coins
-    100, 100, 100, 100, 100, 100, 100, 100, 100, 100,  // L2 Algae Eaters 100 coins
-    200, 200, 200, 200, 200,  // L3 Medium Fish 200 coins
-    500, 500,  // L4A Top 500 coins
-    300, 300   // L4B Large 300 coins
-};
+// 物种价格统一从 engine 获取
 
 static void btn_shop_buy_cb(lv_event_t *e)
 {
@@ -865,7 +859,7 @@ static void shop_fill_all(const struct game_save *save)
         if (!sp) continue;
 
         bool unlocked = save ? ((save->species_unlocked & (1ULL << i)) != 0) : false;
-        uint16_t price = (i < MAX_SPECIES) ? s_species_prices[i] : 100;
+        uint32_t price = engine_get_species_price(i + 1);
 
         // Card container: full width with padding
         lv_obj_t *card = lv_obj_create(g_shop_grid);
@@ -894,7 +888,7 @@ static void shop_fill_all(const struct game_save *save)
         lv_obj_set_style_text_color(price_lbl, lv_color_make(255, 200, 0), 0);
         lv_obj_set_style_text_font(price_lbl, &lv_font_montserrat_14, 0);
         char price_buf[16];
-        snprintf(price_buf, sizeof(price_buf), "$%u", price);
+        snprintf(price_buf, sizeof(price_buf), "$%lu", (unsigned long)price);
         lv_label_set_text(price_lbl, unlocked ? price_buf : "Locked");
 
         // Trophic level color dot (larger)
@@ -980,6 +974,9 @@ void ui_screen_shop_show(const struct game_save *save)
         char buf[32];
         snprintf(buf, sizeof(buf), "$ %lu", (unsigned long)save->photosynth_coins);
         lv_label_set_text(g_shop_coin_lbl, buf);
+        ESP_LOGI(TAG, "Shop coins display: %lu", (unsigned long)save->photosynth_coins);
+    } else {
+        ESP_LOGW(TAG, "Shop coin_lbl=%p, save=%p", g_shop_coin_lbl, save);
     }
 
     // Fill all items

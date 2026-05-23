@@ -60,6 +60,7 @@ bool engine_is_species_unlocked(const struct game_save *save, uint8_t species_id
 
 // 商店购买
 bool engine_buy_species(struct game_save *save, uint8_t species_id);
+uint32_t engine_get_species_price(uint8_t species_id);
 
 // 缸等级升级
 bool engine_upgrade_tank(struct game_save *save);

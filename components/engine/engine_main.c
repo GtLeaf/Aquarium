@@ -222,6 +222,28 @@ bool engine_upgrade_tank(struct game_save *save)
     return true;
 }
 
+uint32_t engine_get_species_price(uint8_t species_id)
+{
+    if (species_id == 0 || species_id > MAX_SPECIES) return 0;
+    const struct species_def *sp = species_get_by_id(species_id);
+    if (!sp) return 0;
+
+    switch (sp->trophic_level) {
+        case 1: return 50;
+        case 2: return 100;
+        case 3: return 150;
+        case 4:
+            switch (sp->rarity) {
+                case RARITY_COMMON:   return 300;
+                case RARITY_RARE:     return 500;
+                case RARITY_LIMITED:  return 800;
+                case RARITY_LONGTAIL: return 1000;
+                default:              return 300;
+            }
+        default: return 100;
+    }
+}
+
 bool engine_buy_species(struct game_save *save, uint8_t species_id)
 {
     if (!save || species_id == 0 || species_id > MAX_SPECIES) return false;
@@ -240,15 +262,8 @@ bool engine_buy_species(struct game_save *save, uint8_t species_id)
     }
     if (same_count >= sp->max_per_tank) return false;
 
-    // 价格根据稀有度
-    uint32_t price = 0;
-    switch (sp->rarity) {
-        case RARITY_COMMON:   price = 50; break;
-        case RARITY_RARE:     price = 150; break;
-        case RARITY_LIMITED:  price = 300; break;
-        case RARITY_LONGTAIL: price = 500; break;
-    }
-    if (save->photosynth_coins < price) return false;
+    uint32_t price = engine_get_species_price(species_id);
+    if (price == 0 || save->photosynth_coins < price) return false;
 
     save->photosynth_coins -= price;
     struct creature *c = &save->creatures[save->creature_count];

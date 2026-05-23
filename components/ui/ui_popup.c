@@ -16,6 +16,15 @@ static enum popup_type g_popup_type = POPUP_NONE;
 static uint8_t g_popup_event_id = 0;
 static bool g_popup_visible = false;
 
+// 前向声明
+void ui_popup_on_click(void);
+
+static void popup_btn_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_popup_on_click();
+}
+
 static void popup_create_base(void)
 {
     if (g_popup_overlay) return;
@@ -73,6 +82,9 @@ static void popup_create_base(void)
     lv_obj_center(lbl);
     lv_obj_set_style_text_color(lbl, lv_color_white(), 0);
     lv_label_set_text(lbl, "OK");
+
+    // 绑定点击回调
+    lv_obj_add_event_cb(g_popup_btn, popup_btn_cb, LV_EVENT_CLICKED, NULL);
 }
 
 static void popup_show(const char *title, const char *msg, enum popup_type type)

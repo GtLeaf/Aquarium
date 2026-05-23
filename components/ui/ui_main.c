@@ -159,6 +159,13 @@ void ui_navigate_home(void)
     ui_screen_shop_hide();
     ui_screen_settings_hide();
     ui_screen_collection_hide();
+
+    // 清理子页面的重对象，释放内存并减少下次渲染负担
+    extern lv_obj_t *g_shop_grid;
+    extern lv_obj_t *g_collection_grid;
+    if (g_shop_grid) lv_obj_clean(g_shop_grid);
+    if (g_collection_grid) lv_obj_clean(g_collection_grid);
+
     lv_obj_t *main = ui_get_main_screen();
     if (main) {
         lv_scr_load(main);
