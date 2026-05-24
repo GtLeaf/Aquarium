@@ -602,6 +602,7 @@ void ui_screen_collection_create(void)
     lv_obj_set_style_pad_gap(g_collection_grid, 8, 0);
     lv_obj_add_flag(g_collection_grid, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(g_collection_grid, LV_DIR_VER);
+    lv_obj_clear_flag(g_collection_grid, LV_OBJ_FLAG_SCROLL_ELASTIC);  // 去掉回弹效果
     lv_obj_add_event_cb(g_collection_grid, grid_scroll_guard_cb, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(g_collection_grid, grid_virtualize_cb, LV_EVENT_SCROLL, NULL);
 }
@@ -1057,7 +1058,7 @@ static void shop_fill_page(void)
         // Buy button
         lv_obj_t *buy_btn = lv_btn_create(card);
         lv_obj_set_size(buy_btn, 80, 40);
-        lv_obj_set_pos(buy_btn, 236, 72);
+        lv_obj_set_pos(buy_btn, 236, 65);
         lv_obj_set_style_bg_color(buy_btn,
             unlocked ? lv_color_make(0, 150, 100) : lv_color_make(80, 80, 80), 0);
         lv_obj_set_style_radius(buy_btn, 6, 0);
@@ -1173,6 +1174,8 @@ void ui_screen_shop_create(void)
     // 分页模式：页内可滚动（每页最多10个item）
     lv_obj_add_flag(g_shop_grid, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_scroll_dir(g_shop_grid, LV_DIR_VER);
+    // 防止滚动状态变更触发 refresh_children_style 导致卡死
+    lv_obj_add_event_cb(g_shop_grid, grid_scroll_guard_cb, LV_EVENT_ALL, NULL);
 
     // 底部分页栏
     s_shop_prev_btn = lv_btn_create(g_shop_screen);
