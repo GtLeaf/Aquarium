@@ -369,27 +369,17 @@ void engine_try_breed(struct game_save *save)
 {
     if (!save || save->creature_count >= MAX_CREATURES) return;
 
-    // PRD §4.9: 每 5 分钟尝试一次繁殖
+    // 每 2 分钟尝试一次繁殖（平衡捕食消耗）
     static uint32_t breed_timer = 0;
     breed_timer++;
-    if (breed_timer < 300) return; // 300 秒 = 5 分钟
+    if (breed_timer < 120) return; // 120 秒 = 2 分钟
     breed_timer = 0;
 
-    // PRD §4.9: 每日每种最多繁殖 1 次
-    // 使用 total_seconds / 86400 作为"天"标识
-    static uint32_t s_last_breed_day = 0;
-    static uint8_t  s_breed_species_today[MAX_SPECIES + 1]; // 今天已繁殖的物种标记
-    uint32_t current_day = save->env.total_seconds / 86400;
-    if (current_day != s_last_breed_day) {
-        s_last_breed_day = current_day;
-        memset(s_breed_species_today, 0, sizeof(s_breed_species_today));
-    }
-
-    // 寻找可繁殖的成对生物（PRD §4.9: 需要两只同种成年体）
+    // 寻找可繁殖的成对生物（需要两只同种成年体）
     for (int i = 0; i < save->creature_count; i++) {
         struct creature *parent_a = &save->creatures[i];
         if (parent_a->stage != STAGE_ADULT && parent_a->stage != STAGE_GIANT) continue;
-        if (parent_a->hunger >= 30) continue; // PRD: 饱食度>70 即 hunger<30
+        if (parent_a->hunger >= 30) continue; // 饱食度>70 即 hunger<30
         if (parent_a->state != 0) continue;
 
         const struct species_def *sp = species_get_by_id(parent_a->species_id);
@@ -397,10 +387,7 @@ void engine_try_breed(struct game_save *save)
         // L4 不繁殖
         if (sp->trophic_level == TROPHIC_L4A || sp->trophic_level == TROPHIC_L4B) continue;
 
-        // 今天该物种已繁殖过则跳过
-        if (parent_a->species_id <= MAX_SPECIES && s_breed_species_today[parent_a->species_id]) continue;
-
-        // PRD §4.9: 需要第二只同种成年个体
+        // 需要第二只同种成年个体
         bool has_partner = false;
         for (int j = 0; j < save->creature_count; j++) {
             if (j == i) continue;
@@ -441,12 +428,7 @@ void engine_try_breed(struct game_save *save)
             baby->state = 0;
             save->creature_count++;
 
-            // 标记今天该物种已繁殖
-            if (parent_a->species_id <= MAX_SPECIES) {
-                s_breed_species_today[parent_a->species_id] = 1;
-            }
-
-            ESP_LOGI(TAG, "Breed success: %s baby born! (day %lu)", sp->name, (unsigned long)current_day);
+            ESP_LOGI(TAG, "Breed success: %s baby born!", sp->name);
             engine_mark_dirty();
             break; // 每次只繁殖一只
         }

@@ -8,6 +8,30 @@
 
 static const char *TAG = "engine_logic";
 
+// ─── 营养级分组索引（每秒重建一次，供觅食/逃跑快速查表） ───
+#define MAX_GROUP MAX_CREATURES
+static struct {
+    uint8_t l1[MAX_GROUP]; uint8_t l1_n;
+    uint8_t l2[MAX_GROUP]; uint8_t l2_n;
+    uint8_t l3[MAX_GROUP]; uint8_t l3_n;
+    uint8_t l4[MAX_GROUP]; uint8_t l4_n;  // L4A + L4B 合并
+} s_level_idx;
+
+static void rebuild_level_index(const struct game_save *save)
+{
+    s_level_idx.l1_n = s_level_idx.l2_n = s_level_idx.l3_n = s_level_idx.l4_n = 0;
+    for (int i = 0; i < save->creature_count; i++) {
+        const struct species_def *sp = species_get_by_id(save->creatures[i].species_id);
+        if (!sp) continue;
+        switch (sp->trophic_level) {
+            case TROPHIC_L1: s_level_idx.l1[s_level_idx.l1_n++] = (uint8_t)i; break;
+            case TROPHIC_L2: s_level_idx.l2[s_level_idx.l2_n++] = (uint8_t)i; break;
+            case TROPHIC_L3: s_level_idx.l3[s_level_idx.l3_n++] = (uint8_t)i; break;
+            default:         s_level_idx.l4[s_level_idx.l4_n++] = (uint8_t)i; break;
+        }
+    }
+}
+
 // ============================================================
 // §4.3 环境层更新 (每秒调用一次)
 // ============================================================
@@ -212,7 +236,7 @@ static void forage_l2(struct game_context *ctx, struct creature *c, const struct
     }
 }
 
-// ─── 猎物逃跑AI：检测附近捕食者，反方向逃跑 ───
+// ─── 猎物逃跑AI：使用分组索引，只扫描高级捕食者 ───
 static void prey_flee(struct game_context *ctx, struct creature *prey, const struct species_def *prey_sp)
 {
     // 只有正常态才逃跑
@@ -221,37 +245,47 @@ static void prey_flee(struct game_context *ctx, struct creature *prey, const str
     if (prey_sp->trophic_level == TROPHIC_L1) return;
     if (prey_sp->trophic_level >= TROPHIC_L4A) return;
 
-    // 扫描附近是否有捕食者正在靠近
-    uint8_t flee_radius = 20; // 感知半径
+    // 扫描附近是否有捕食者正在靠近（只查比自己高级的分组）
+    uint8_t flee_radius = 20;
     int threat_idx = -1;
     uint16_t closest_dist = 255;
 
-    for (int j = 0; j < ctx->save.creature_count; j++) {
-        struct creature *hunter = &ctx->save.creatures[j];
-        if (hunter == prey) continue;
-        if (hunter->state != 0) continue;
+    // L2 怕 L3+L4；L3 怕 L4
+    const uint8_t *scan_groups[2];
+    uint8_t scan_counts[2];
+    uint8_t num_groups = 0;
 
-        const struct species_def *hunter_sp = species_get_by_id(hunter->species_id);
-        if (!hunter_sp) continue;
+    if (prey_sp->trophic_level == TROPHIC_L2) {
+        scan_groups[num_groups] = s_level_idx.l3;
+        scan_counts[num_groups] = s_level_idx.l3_n;
+        num_groups++;
+        scan_groups[num_groups] = s_level_idx.l4;
+        scan_counts[num_groups] = s_level_idx.l4_n;
+        num_groups++;
+    } else if (prey_sp->trophic_level == TROPHIC_L3) {
+        scan_groups[num_groups] = s_level_idx.l4;
+        scan_counts[num_groups] = s_level_idx.l4_n;
+        num_groups++;
+    }
 
-        // 只怕比自己营养级高的，或同级但体型大很多的
-        bool is_threat = false;
-        if (hunter_sp->trophic_level > prey_sp->trophic_level) {
-            is_threat = true;
-        } else if (hunter_sp->trophic_level == prey_sp->trophic_level &&
-                   hunter_sp->id != prey_sp->id &&
-                   hunter->size > prey->size * 3 / 2) {
-            is_threat = true;
-        }
-        if (!is_threat) continue;
+    for (uint8_t g = 0; g < num_groups; g++) {
+        for (uint8_t k = 0; k < scan_counts[g]; k++) {
+            int j = scan_groups[g][k];
+            struct creature *hunter = &ctx->save.creatures[j];
+            if (hunter == prey) continue;
+            if (hunter->state != 0) continue;
 
-        // 只有捕食者在饥饿状态才构成威胁
-        if (hunter->hunger < 30) continue;
+            const struct species_def *hunter_sp = species_get_by_id(hunter->species_id);
+            if (!hunter_sp) continue;
 
-        uint16_t dist = creature_distance(prey, hunter);
-        if (dist < flee_radius && dist < closest_dist) {
-            closest_dist = dist;
-            threat_idx = j;
+            // 只有捕食者在饥饿状态才构成威胁
+            if (hunter->hunger < 30) continue;
+
+            uint16_t dist = creature_distance(prey, hunter);
+            if (dist < flee_radius && dist < closest_dist) {
+                closest_dist = dist;
+                threat_idx = j;
+            }
         }
     }
 
@@ -282,60 +316,84 @@ static void prey_flee(struct game_context *ctx, struct creature *prey, const str
     }
 }
 
-// ─── L3/L4 捕食AI：eats[] + alt_eats[] + 体型规则 + L4同级捕食 ───
+// ─── L3/L4 捕食AI：使用分组索引，只扫描有效猎物层级 ───
 static void forage_predator(struct game_context *ctx, struct creature *c, const struct species_def *sp)
 {
     if (c->hunger < 30) return;
 
     uint8_t hunt_radius = (sp->trophic_level >= TROPHIC_L4A) ? 50 : 35;
+    // 饥饿>70时，捕食范围扩大50%
+    if (c->hunger > 70) {
+        hunt_radius = hunt_radius * 3 / 2;
+    }
     int best_idx = -1;
     uint16_t best_dist = 255;
 
-    for (int j = 0; j < ctx->save.creature_count; j++) {
-        struct creature *prey = &ctx->save.creatures[j];
-        if (prey == c) continue;
-        if (prey->state != 0) continue;
+    // 构建待扫描的索引列表（只看比自己低级的 + L4同级特例）
+    // L3 → 扫描 L2；L4 → 扫描 L2 + L3 + L4(同级)
+    const uint8_t *scan_groups[3];
+    uint8_t scan_counts[3];
+    uint8_t num_groups = 0;
 
-        const struct species_def *prey_sp = species_get_by_id(prey->species_id);
-        if (!prey_sp) continue;
+    scan_groups[num_groups] = s_level_idx.l2;
+    scan_counts[num_groups] = s_level_idx.l2_n;
+    num_groups++;
 
-        // 不吃 L1 植物
-        if (prey_sp->trophic_level == TROPHIC_L1) continue;
+    if (sp->trophic_level >= TROPHIC_L4A) {
+        scan_groups[num_groups] = s_level_idx.l3;
+        scan_counts[num_groups] = s_level_idx.l3_n;
+        num_groups++;
+        // L4 同级捕食
+        scan_groups[num_groups] = s_level_idx.l4;
+        scan_counts[num_groups] = s_level_idx.l4_n;
+        num_groups++;
+    }
 
-        bool can_eat = false;
+    for (uint8_t g = 0; g < num_groups; g++) {
+        for (uint8_t k = 0; k < scan_counts[g]; k++) {
+            int j = scan_groups[g][k];
+            struct creature *prey = &ctx->save.creatures[j];
+            if (prey == c) continue;
+            if (prey->state != 0) continue;
 
-        // 规则1: eats[] 主食列表
-        if (is_in_diet(sp->eats, prey->species_id)) {
-            can_eat = true;
-        }
+            const struct species_def *prey_sp = species_get_by_id(prey->species_id);
+            if (!prey_sp) continue;
 
-        // 规则2: alt_eats[] 备选列表
-        if (!can_eat && is_in_diet(sp->alt_eats, prey->species_id)) {
-            can_eat = true;
-        }
+            bool can_eat = false;
 
-        // 规则3: 低营养级 + 体型 ≤ 自身70%
-        if (!can_eat && prey_sp->trophic_level < sp->trophic_level) {
-            uint8_t size_threshold = (uint8_t)(c->size * 7 / 10);
-            if (prey->size <= size_threshold) can_eat = true;
-        }
+            // 规则1: eats[] 主食列表
+            if (is_in_diet(sp->eats, prey->species_id)) {
+                can_eat = true;
+            }
 
-        // 规则4: L4 可捕食非同种的较小 L4（体型 ≤ 自身60%）
-        if (!can_eat &&
-            (sp->trophic_level == TROPHIC_L4A || sp->trophic_level == TROPHIC_L4B) &&
-            (prey_sp->trophic_level == TROPHIC_L4A || prey_sp->trophic_level == TROPHIC_L4B) &&
-            prey_sp->id != sp->id)  // 非同种
-        {
-            uint8_t size_threshold = (uint8_t)(c->size * 6 / 10); // ≤ 60%
-            if (prey->size <= size_threshold) can_eat = true;
-        }
+            // 规则2: alt_eats[] 备选列表
+            if (!can_eat && is_in_diet(sp->alt_eats, prey->species_id)) {
+                can_eat = true;
+            }
 
-        if (!can_eat) continue;
+            // 规则3: 低营养级 + 体型 ≤ 自身70%
+            if (!can_eat && prey_sp->trophic_level < sp->trophic_level) {
+                uint8_t size_threshold = (uint8_t)(c->size * 7 / 10);
+                if (prey->size <= size_threshold) can_eat = true;
+            }
 
-        uint16_t dist = creature_distance(c, prey);
-        if (dist < hunt_radius && dist < best_dist) {
-            best_dist = dist;
-            best_idx = j;
+            // 规则4: L4 可捕食非同种的较小 L4（体型 ≤ 自身60%）
+            if (!can_eat &&
+                (sp->trophic_level == TROPHIC_L4A || sp->trophic_level == TROPHIC_L4B) &&
+                (prey_sp->trophic_level == TROPHIC_L4A || prey_sp->trophic_level == TROPHIC_L4B) &&
+                prey_sp->id != sp->id)
+            {
+                uint8_t size_threshold = (uint8_t)(c->size * 6 / 10);
+                if (prey->size <= size_threshold) can_eat = true;
+            }
+
+            if (!can_eat) continue;
+
+            uint16_t dist = creature_distance(c, prey);
+            if (dist < hunt_radius && dist < best_dist) {
+                best_dist = dist;
+                best_idx = j;
+            }
         }
     }
 
@@ -350,8 +408,32 @@ static void forage_predator(struct game_context *ctx, struct creature *c, const 
         if (prey->pos_y > c->pos_y) c->vel_y = (int8_t)(speed / 2 + 1);
         else if (prey->pos_y < c->pos_y) c->vel_y = (int8_t)(-(speed / 2 + 1));
 
-        // 接触判定：距离 < 8 执行捕食
+        // 接触判定：距离 < 8 执行捕食尝试
         if (best_dist < 8) {
+            // ─── 逃脱概率：猎物有机会挣脱 ───
+            // 基础逃脱率 40%，猎物体型越小越灵活（+10%），捕食者饥饿越高越凶猛（-10%）
+            uint8_t escape_chance = 40;
+            if (prey->size < c->size / 2) escape_chance += 10;  // 小猎物更灵活
+            if (c->hunger > 70) escape_chance -= 10;            // 饥饿捕食者更拼命
+            if (escape_chance > 70) escape_chance = 70;         // 上限70%
+            if (escape_chance < 15) escape_chance = 15;         // 下限15%
+
+            if ((esp_random() % 100) < escape_chance) {
+                // 逃脱成功！猎物获得短暂加速逃离
+                int8_t flee_speed = 2;
+                if (c->pos_x > prey->pos_x) { prey->vel_x = -flee_speed; prey->facing_right = false; }
+                else { prey->vel_x = flee_speed; prey->facing_right = true; }
+                if (c->pos_y > prey->pos_y) prey->vel_y = -flee_speed;
+                else prey->vel_y = flee_speed;
+                prey->rest_frames = 0;
+                prey->decel_frames = 0;
+                // 捕食者短暂呆滞（错愕），30帧不追
+                c->rest_frames = 30;
+                ESP_LOGI(TAG, "Escape! prey dodged %s", sp->name);
+                return; // 本次捕食失败，结束觅食
+            }
+
+            // ─── 捕食成功 ───
             // 捕食收益：按猎物体型计算
             uint8_t relief = (prey->size / 3) + 5;
             if (relief > 30) relief = 30;
@@ -397,6 +479,9 @@ static void forage_predator(struct game_context *ctx, struct creature *c, const 
 // ============================================================
 static void update_creatures(struct game_context *ctx)
 {
+    // 每秒重建营养级分组索引（O(N)，供觅食/逃跑快速查表）
+    rebuild_level_index(&ctx->save);
+
     for (int i = 0; i < ctx->save.creature_count; i++) {
         struct creature *c = &ctx->save.creatures[i];
         const struct species_def *sp = species_get_by_id(c->species_id);
@@ -416,13 +501,19 @@ static void update_creatures(struct game_context *ctx)
             }
         }
 
-        // ─── 逃跑AI（每2秒检测一次） ───
-        if (c->state == 0 && (c->age_seconds % 2 == 0)) {
+        // ─── 逃跑AI（按索引错峰，每2秒周期内均匀分散） ───
+        if (c->state == 0 && ((c->age_seconds + i) % 2 == 0)) {
             prey_flee(ctx, c, sp);
         }
 
-        // ─── 觅食AI（每3秒执行一次，避免过于频繁） ───
-        if (c->state == 0 && (c->age_seconds % 3 == 0)) {
+        // ─── 觅食AI（按索引错峰，每3秒周期内均匀分散；饥饿>70时每秒执行） ───
+        bool forage_now = false;
+        if (c->hunger > 70) {
+            forage_now = true;  // 饥饿时每秒都觅食
+        } else {
+            forage_now = ((c->age_seconds + i) % 3 == 0);
+        }
+        if (c->state == 0 && forage_now) {
             switch (sp->trophic_level) {
                 case TROPHIC_L2:
                     forage_l2(ctx, c, sp);
@@ -727,6 +818,7 @@ void engine_logic_update(struct game_context *ctx)
 // ============================================================
 // 物理位置更新：由 engine_tick() 每帧(33ms/30FPS)调用
 // 帧间隔运动模型 + 停歇减速
+//   L1植物: ~1px/3s 极缓漂移
 //   巡游: L2=5px/s, L3=8px/s, L4=10px/s
 //   追猎: L3=25px/s, L4=25px/s
 //   逃跑: L2=12px/s, L3=25px/s
@@ -743,8 +835,36 @@ void engine_physics_update(struct game_context *ctx)
         const struct species_def *sp = species_get_by_id(c->species_id);
         if (!sp) continue;
 
-        // L1 植物不移动
-        if (sp->trophic_level == TROPHIC_L1) continue;
+        // L1 植物：极缓漂移（~1px/3s），防止聚集
+        if (sp->trophic_level == TROPHIC_L1) {
+            // 每90帧移动1px（约3秒1px）
+            if (fc % 90 == 0) {
+                // 每30秒随机换方向
+                if (fc % 600 == 0 || (c->vel_x == 0 && c->vel_y == 0)) {
+                    c->vel_x = (int8_t)((esp_random() % 3) - 1); // -1, 0, +1
+                    c->vel_y = (int8_t)((esp_random() % 3) - 1);
+                    // 保证至少有一个方向在动
+                    if (c->vel_x == 0 && c->vel_y == 0) {
+                        c->vel_x = (esp_random() % 2) ? 1 : -1;
+                    }
+                }
+                int8_t dx = 0, dy = 0;
+                if (c->vel_x > 0) dx = 1;
+                else if (c->vel_x < 0) dx = -1;
+                if (c->vel_y > 0) dy = 1;
+                else if (c->vel_y < 0) dy = -1;
+
+                c->pos_x += dx;
+                c->pos_y += dy;
+
+                // 边界约束（植物贴底部活动，y: 80~120 范围）
+                if (c->pos_x <= 2) { c->pos_x = 3; c->vel_x = 1; }
+                if (c->pos_x >= 118) { c->pos_x = 117; c->vel_x = -1; }
+                if (c->pos_y < 80) { c->pos_y = 80; c->vel_y = 1; }
+                if (c->pos_y >= 118) { c->pos_y = 117; c->vel_y = -1; }
+            }
+            continue;
+        }
 
         // ─── 判断是否处于加速状态（追猎/逃跑） ───
         bool is_accel = (c->vel_x > 1 || c->vel_x < -1 || c->vel_y > 1 || c->vel_y < -1);
