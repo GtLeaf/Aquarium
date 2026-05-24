@@ -12,6 +12,59 @@
 
 static const char *TAG = "ui_screens";
 
+/**
+ * 滚动容器事件守卫：拦截 PRESSED/FOCUSED/SCROLL_BEGIN/SCROLL_END 事件，
+ * 阻止 LVGL 默认的 lv_obj_add/remove_state 执行，
+ * 从而避免 refresh_children_style 递归遍历大量子对象导致 WDT。
+ * 滚动本身不受影响（由 indev 内部直接操作 scroll offset）。
+ */
+static void grid_scroll_guard_cb(lv_event_t *e)
+{
+    lv_event_code_t code = lv_event_get_code(e);
+    if (code == LV_EVENT_PRESSED || code == LV_EVENT_RELEASED ||
+        code == LV_EVENT_PRESS_LOST || code == LV_EVENT_FOCUSED ||
+        code == LV_EVENT_DEFOCUSED || code == LV_EVENT_SCROLL_BEGIN ||
+        code == LV_EVENT_SCROLL_END) {
+        lv_event_stop_processing(e);
+        lv_event_stop_bubbling(e);
+    }
+}
+
+/**
+ * 虚拟化滚动回调：根据视口可见区域 show/hide 子对象。
+ * 只有在视口范围内（含上下各 1 个卡片的缓冲区）的对象才可见，
+ * 大幅减少 LVGL 每帧需要渲染的对象数量。
+ */
+static void grid_virtualize_cb(lv_event_t *e)
+{
+    lv_obj_t *grid = lv_event_get_target(e);
+    int32_t scroll_y = lv_obj_get_scroll_y(grid);
+    int32_t grid_h = lv_obj_get_height(grid);
+
+    // 可见范围: [scroll_y - buffer, scroll_y + grid_h + buffer]
+    int32_t vis_top = scroll_y - 160;  // 缓冲区：1个卡片高度
+    int32_t vis_bot = scroll_y + grid_h + 160;
+
+    uint32_t cnt = lv_obj_get_child_count(grid);
+    for (uint32_t i = 0; i < cnt; i++) {
+        lv_obj_t *child = lv_obj_get_child(grid, i);
+        int32_t cy = lv_obj_get_y(child);
+        int32_t ch = lv_obj_get_height(child);
+
+        if ((cy + ch) < vis_top || cy > vis_bot) {
+            // 不在视口内 — 隐藏
+            if (!lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+                lv_obj_add_flag(child, LV_OBJ_FLAG_HIDDEN);
+            }
+        } else {
+            // 在视口内 — 显示
+            if (lv_obj_has_flag(child, LV_OBJ_FLAG_HIDDEN)) {
+                lv_obj_remove_flag(child, LV_OBJ_FLAG_HIDDEN);
+            }
+        }
+    }
+}
+
 static lv_obj_t *g_main_screen = NULL;
 static lv_obj_t *g_status_bar = NULL;
 static lv_obj_t *g_tank_area = NULL;
@@ -191,24 +244,54 @@ void ui_screen_main_update(const struct game_context *ctx)
 
     const struct game_save *save = &ctx->save;
 
-    // 更新状态栏
+    // 状态栏：仅在数值变化时刷新 label
+    static uint8_t  prev_sun = 0xFF;
+    static uint8_t  prev_nut = 0xFF;
+    static uint8_t  prev_o2  = 0xFF;
+    static uint32_t prev_coins = 0xFFFFFFFF;
+    static uint8_t  prev_count = 0xFF;
+
     char buf[32];
-    snprintf(buf, sizeof(buf), "☀ %d", save->env.sunlight);
-    lv_label_set_text(g_lbl_sun, buf);
 
-    snprintf(buf, sizeof(buf), "N %d", save->env.nutrients);
-    lv_label_set_text(g_lbl_nutrients, buf);
+    if (save->env.sunlight != prev_sun) {
+        prev_sun = save->env.sunlight;
+        snprintf(buf, sizeof(buf), "☀ %d", prev_sun);
+        lv_label_set_text(g_lbl_sun, buf);
+    }
+    if (save->env.nutrients != prev_nut) {
+        prev_nut = save->env.nutrients;
+        snprintf(buf, sizeof(buf), "N %d", prev_nut);
+        lv_label_set_text(g_lbl_nutrients, buf);
+    }
+    if (save->env.oxygen != prev_o2) {
+        prev_o2 = save->env.oxygen;
+        snprintf(buf, sizeof(buf), "O2 %d", prev_o2);
+        lv_label_set_text(g_lbl_oxygen, buf);
+    }
+    if (save->photosynth_coins != prev_coins) {
+        prev_coins = save->photosynth_coins;
+        snprintf(buf, sizeof(buf), "$ %lu", (unsigned long)prev_coins);
+        lv_label_set_text(g_lbl_coins, buf);
+    }
+    if (save->creature_count != prev_count) {
+        prev_count = save->creature_count;
+        snprintf(buf, sizeof(buf), "%d/%d", prev_count, MAX_CREATURES);
+        lv_label_set_text(g_lbl_creature_count, buf);
+    }
 
-    snprintf(buf, sizeof(buf), "O2 %d", save->env.oxygen);
-    lv_label_set_text(g_lbl_oxygen, buf);
+    // 生物色块：缓存属性，仅变化时更新 LVGL 对象
+    static struct {
+        int16_t pos_x, pos_y;
+        int16_t size;
+        uint8_t trophic_level;
+        uint8_t state;
+    } creature_cache[MAX_CREATURES];
+    static bool cache_initialized = false;
+    if (!cache_initialized) {
+        memset(creature_cache, 0xFF, sizeof(creature_cache));
+        cache_initialized = true;
+    }
 
-    snprintf(buf, sizeof(buf), "$ %lu", (unsigned long)save->photosynth_coins);
-    lv_label_set_text(g_lbl_coins, buf);
-
-    snprintf(buf, sizeof(buf), "%d/%d", save->creature_count, MAX_CREATURES);
-    lv_label_set_text(g_lbl_creature_count, buf);
-
-    // 更新或创建生物色块
     for (int i = 0; i < MAX_CREATURES; i++) {
         if (i < save->creature_count) {
             const struct creature *c = &save->creatures[i];
@@ -226,6 +309,12 @@ void ui_screen_main_update(const struct game_context *ctx)
                 lv_obj_add_event_cb(obj, creature_click_cb, LV_EVENT_CLICKED, NULL);
                 lv_obj_add_event_cb(obj, creature_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
                 g_creature_objs[i] = obj;
+                // 强制首帧刷新
+                creature_cache[i].pos_x = -1;
+                creature_cache[i].pos_y = -1;
+                creature_cache[i].size = -1;
+                creature_cache[i].trophic_level = 0xFF;
+                creature_cache[i].state = 0xFF;
             }
 
             // 位置映射 (0-127 -> 屏幕坐标)
@@ -237,18 +326,30 @@ void ui_screen_main_update(const struct game_context *ctx)
             if (sz < 8) sz = 8;
             if (sz > 32) sz = 32;
 
-            lv_obj_set_size(obj, sz, sz);
-            lv_obj_set_pos(obj, screen_x, screen_y);
-            lv_obj_set_style_bg_color(obj, get_trophic_color(sp->trophic_level), 0);
+            if (sz != creature_cache[i].size) {
+                lv_obj_set_size(obj, sz, sz);
+                creature_cache[i].size = sz;
+            }
+            if (screen_x != creature_cache[i].pos_x ||
+                screen_y != creature_cache[i].pos_y) {
+                lv_obj_set_pos(obj, screen_x, screen_y);
+                creature_cache[i].pos_x = screen_x;
+                creature_cache[i].pos_y = screen_y;
+            }
+            if (sp->trophic_level != creature_cache[i].trophic_level) {
+                lv_obj_set_style_bg_color(obj, get_trophic_color(sp->trophic_level), 0);
+                creature_cache[i].trophic_level = sp->trophic_level;
+            }
 
-            // 存储索引到 user_data，用于点击识别
             lv_obj_set_user_data(obj, (void *)(intptr_t)i);
 
-            // 睡眠态显示半透明
-            if (c->state == 1) {
-                lv_obj_set_style_bg_opa(obj, LV_OPA_30, 0);
-            } else {
-                lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+            if (c->state != creature_cache[i].state) {
+                creature_cache[i].state = c->state;
+                if (c->state == 1) {
+                    lv_obj_set_style_bg_opa(obj, LV_OPA_30, 0);
+                } else {
+                    lv_obj_set_style_bg_opa(obj, LV_OPA_COVER, 0);
+                }
             }
         } else {
             if (g_creature_objs[i]) {
@@ -494,26 +595,44 @@ void ui_screen_collection_create(void)
     lv_obj_set_pos(g_collection_grid, 14, 70);
     lv_obj_set_style_bg_opa(g_collection_grid, LV_OPA_0, 0);
     lv_obj_set_style_border_width(g_collection_grid, 0, 0);
+    lv_obj_set_style_shadow_width(g_collection_grid, 0, 0);
+    lv_obj_set_style_pad_all(g_collection_grid, 4, 0);
     lv_obj_set_flex_flow(g_collection_grid, LV_FLEX_FLOW_ROW_WRAP);
     lv_obj_set_flex_align(g_collection_grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_gap(g_collection_grid, 8, 0);
     lv_obj_add_flag(g_collection_grid, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(g_collection_grid, LV_DIR_VER);
+    lv_obj_add_event_cb(g_collection_grid, grid_scroll_guard_cb, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(g_collection_grid, grid_virtualize_cb, LV_EVENT_SCROLL, NULL);
 }
 
-void ui_screen_collection_show(const struct game_save *save)
+// 分批填充图鉴列表（避免一次性创建过多对象触发 WDT）
+#define COLL_BATCH_SIZE 1
+static lv_timer_t *s_coll_fill_timer = NULL;
+static int         s_coll_fill_index = 0;
+static const struct game_save *g_coll_save_ref = NULL;
+
+static void coll_fill_batch_cb(lv_timer_t *t)
 {
-    if (!g_collection_screen) ui_screen_collection_create();
-    if (!g_collection_grid) return;
+    (void)t;
+    (void)t;
 
-    // 清除旧内容
-    lv_obj_clean(g_collection_grid);
+    if (!g_collection_grid) {
+        lv_timer_del(t);
+        s_coll_fill_timer = NULL;
+        return;
+    }
 
-    // 填充物种卡片
-    for (int i = 0; i < species_get_count(); i++) {
+    int count = species_get_count();
+    int end = s_coll_fill_index + COLL_BATCH_SIZE;
+    if (end > count) end = count;
+
+    for (int i = s_coll_fill_index; i < end; i++) {
         const struct species_def *sp = species_get_by_id(i + 1);
         if (!sp) continue;
 
-        bool unlocked = save ? ((save->species_unlocked & (1ULL << i)) != 0) : false;
+        bool unlocked = g_coll_save_ref ?
+            ((g_coll_save_ref->species_unlocked & (1ULL << i)) != 0) : false;
 
         lv_obj_t *card = lv_obj_create(g_collection_grid);
         lv_obj_set_size(card, 72, 72);
@@ -522,7 +641,8 @@ void ui_screen_collection_show(const struct game_save *save)
             unlocked ? get_trophic_color(sp->trophic_level) : lv_color_make(40, 40, 40), 0);
         lv_obj_set_style_border_width(card, 1, 0);
         lv_obj_set_style_border_color(card, lv_color_make(60, 60, 60), 0);
-        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_set_style_shadow_width(card, 0, 0);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
 
         // 名称
         lv_obj_t *name = lv_label_create(card);
@@ -535,7 +655,47 @@ void ui_screen_collection_show(const struct game_save *save)
         lv_label_set_text(name, unlocked ? sp->name : "???");
     }
 
+    s_coll_fill_index = end;
+
+    // 每个 batch 结束后立即隐藏超出视口的卡片，防止下一帧渲染 off-screen label
+    lv_obj_send_event(g_collection_grid, LV_EVENT_SCROLL, NULL);
+
+    if (s_coll_fill_index >= count) {
+        lv_timer_del(t);
+        s_coll_fill_timer = NULL;
+        // 完成时最终虚拟化（上面已做，此处保留确保一致性）
+        lv_obj_send_event(g_collection_grid, LV_EVENT_SCROLL, NULL);
+    }
+}
+
+void ui_screen_collection_show(const struct game_save *save)
+{
+    if (!g_collection_screen) ui_screen_collection_create();
+    if (!g_collection_grid) return;
+
+    // 清除旧内容
+    lv_obj_clean(g_collection_grid);
+
+    // 分批填充物种卡片（避免 WDT）
+    s_coll_fill_index = 0;
+    g_coll_save_ref = save;
+
+    if (s_coll_fill_timer) {
+        lv_timer_del(s_coll_fill_timer);
+        s_coll_fill_timer = NULL;
+    }
+    s_coll_fill_timer = lv_timer_create(coll_fill_batch_cb, 100, NULL);
+
     lv_scr_load(g_collection_screen);
+}
+
+// 停止图鉴填充（导航离开时调用）
+void ui_collection_stop_fill(void)
+{
+    if (s_coll_fill_timer) {
+        lv_timer_del(s_coll_fill_timer);
+        s_coll_fill_timer = NULL;
+    }
 }
 
 void ui_screen_collection_hide(void)
@@ -793,10 +953,12 @@ lv_obj_t *g_shop_grid = NULL;
 static lv_obj_t *g_shop_coin_lbl = NULL;
 static const struct game_save *g_shop_save_ref = NULL;
 
-// 分批填充商店列表（避免一次性创建过多对象触发 WDT）
-#define SHOP_BATCH_SIZE 3
-static lv_timer_t *s_shop_fill_timer = NULL;
-static int         s_shop_fill_index = 0;
+// 分页模式：每页最多 10 个 item，避免一次性创建过多对象触发 WDT
+#define SHOP_PAGE_SIZE 10
+static int         s_shop_current_page = 0;
+static lv_obj_t   *s_shop_page_lbl = NULL;
+static lv_obj_t   *s_shop_prev_btn = NULL;
+static lv_obj_t   *s_shop_next_btn = NULL;
 
 static void btn_shop_buy_cb(lv_event_t *e)
 {
@@ -832,21 +994,19 @@ static void btn_shop_buy_cb(lv_event_t *e)
     }
 }
 
-// 分批填充回调：每次创建 SHOP_BATCH_SIZE 个卡片，避免单帧耗时超过 WDT
-static void shop_fill_batch_cb(lv_timer_t *t)
+// 同步填充当前页的卡片（最多 SHOP_PAGE_SIZE 个，不会触发 WDT）
+static void shop_fill_page(void)
 {
-    (void)t;
-    if (!g_shop_grid) {
-        lv_timer_del(t);
-        s_shop_fill_timer = NULL;
-        return;
-    }
+    if (!g_shop_grid) return;
+
+    lv_obj_clean(g_shop_grid);
 
     int count = species_get_count();
-    int end = s_shop_fill_index + SHOP_BATCH_SIZE;
+    int start = s_shop_current_page * SHOP_PAGE_SIZE;
+    int end = start + SHOP_PAGE_SIZE;
     if (end > count) end = count;
 
-    for (int i = s_shop_fill_index; i < end; i++) {
+    for (int i = start; i < end; i++) {
         const struct species_def *sp = species_get_by_id(i + 1);
         if (!sp) continue;
 
@@ -856,16 +1016,18 @@ static void shop_fill_batch_cb(lv_timer_t *t)
 
         // Card container: full width with padding
         lv_obj_t *card = lv_obj_create(g_shop_grid);
-        lv_obj_set_size(card, 336, 148);
+        lv_obj_set_size(card, 336, 130);
         lv_obj_set_style_radius(card, 8, 0);
         lv_obj_set_style_bg_color(card,
             unlocked ? lv_color_make(30, 45, 60) : lv_color_make(30, 30, 30), 0);
         lv_obj_set_style_border_width(card, 1, 0);
         lv_obj_set_style_border_color(card,
             unlocked ? lv_color_make(0, 150, 200) : lv_color_make(60, 60, 60), 0);
+        lv_obj_set_style_shadow_width(card, 0, 0);
         lv_obj_clear_flag(card, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_clear_flag(card, LV_OBJ_FLAG_CLICKABLE);
 
-        // Species name (larger, centered vertically in upper half)
+        // Species name
         lv_obj_t *name = lv_label_create(card);
         lv_obj_set_pos(name, 16, 20);
         lv_obj_set_width(name, 220);
@@ -875,7 +1037,7 @@ static void shop_fill_batch_cb(lv_timer_t *t)
         lv_obj_set_style_text_font(name, &lv_font_montserrat_14, 0);
         lv_label_set_text(name, unlocked ? sp->name : "???");
 
-        // Price tag (larger, below name)
+        // Price tag
         lv_obj_t *price_lbl = lv_label_create(card);
         lv_obj_set_pos(price_lbl, 16, 52);
         lv_obj_set_style_text_color(price_lbl, lv_color_make(255, 200, 0), 0);
@@ -884,7 +1046,7 @@ static void shop_fill_batch_cb(lv_timer_t *t)
         snprintf(price_buf, sizeof(price_buf), "$%lu", (unsigned long)price);
         lv_label_set_text(price_lbl, unlocked ? price_buf : "Locked");
 
-        // Trophic level color dot (larger)
+        // Trophic level color dot
         lv_obj_t *troph_dot = lv_obj_create(card);
         lv_obj_set_size(troph_dot, 16, 16);
         lv_obj_set_pos(troph_dot, 296, 20);
@@ -892,10 +1054,10 @@ static void shop_fill_batch_cb(lv_timer_t *t)
         lv_obj_set_style_bg_color(troph_dot, get_trophic_color(sp->trophic_level), 0);
         lv_obj_set_style_border_width(troph_dot, 0, 0);
 
-        // Buy button (larger, right side)
+        // Buy button
         lv_obj_t *buy_btn = lv_btn_create(card);
         lv_obj_set_size(buy_btn, 80, 40);
-        lv_obj_set_pos(buy_btn, 236, 80);
+        lv_obj_set_pos(buy_btn, 236, 72);
         lv_obj_set_style_bg_color(buy_btn,
             unlocked ? lv_color_make(0, 150, 100) : lv_color_make(80, 80, 80), 0);
         lv_obj_set_style_radius(buy_btn, 6, 0);
@@ -910,40 +1072,58 @@ static void shop_fill_batch_cb(lv_timer_t *t)
         }
     }
 
-    s_shop_fill_index = end;
+    // 更新页码显示
+    if (s_shop_page_lbl) {
+        int total_pages = (count + SHOP_PAGE_SIZE - 1) / SHOP_PAGE_SIZE;
+        char page_buf[24];
+        snprintf(page_buf, sizeof(page_buf), "%d / %d", s_shop_current_page + 1, total_pages);
+        lv_label_set_text(s_shop_page_lbl, page_buf);
+    }
 
-    if (s_shop_fill_index >= count) {
-        lv_timer_del(t);
-        s_shop_fill_timer = NULL;
+    // 更新翻页按钮状态
+    if (s_shop_prev_btn) {
+        if (s_shop_current_page <= 0) {
+            lv_obj_add_state(s_shop_prev_btn, LV_STATE_DISABLED);
+            lv_obj_set_style_bg_opa(s_shop_prev_btn, LV_OPA_50, LV_STATE_DISABLED);
+        } else {
+            lv_obj_clear_state(s_shop_prev_btn, LV_STATE_DISABLED);
+        }
+    }
+    if (s_shop_next_btn) {
+        int total_pages = (count + SHOP_PAGE_SIZE - 1) / SHOP_PAGE_SIZE;
+        if (s_shop_current_page >= total_pages - 1) {
+            lv_obj_add_state(s_shop_next_btn, LV_STATE_DISABLED);
+            lv_obj_set_style_bg_opa(s_shop_next_btn, LV_OPA_50, LV_STATE_DISABLED);
+        } else {
+            lv_obj_clear_state(s_shop_next_btn, LV_STATE_DISABLED);
+        }
     }
 }
 
-// 启动分批填充商店列表
-static void shop_fill_list(const struct game_save *save)
+static void btn_shop_prev_cb(lv_event_t *e)
 {
-    if (!g_shop_grid) return;
-
-    // 如果上一次填充还在进行，先停止
-    if (s_shop_fill_timer) {
-        lv_timer_del(s_shop_fill_timer);
-        s_shop_fill_timer = NULL;
+    (void)e;
+    if (s_shop_current_page > 0) {
+        s_shop_current_page--;
+        shop_fill_page();
     }
-
-    lv_obj_clean(g_shop_grid);
-    s_shop_fill_index = 0;
-    g_shop_save_ref = save;
-
-    // 创建 0ms 周期 timer，每次回调填充一批
-    s_shop_fill_timer = lv_timer_create(shop_fill_batch_cb, 0, NULL);
 }
 
-// 停止商店填充（导航离开时调用）
+static void btn_shop_next_cb(lv_event_t *e)
+{
+    (void)e;
+    int count = species_get_count();
+    int total_pages = (count + SHOP_PAGE_SIZE - 1) / SHOP_PAGE_SIZE;
+    if (s_shop_current_page < total_pages - 1) {
+        s_shop_current_page++;
+        shop_fill_page();
+    }
+}
+
+// 停止商店填充（导航离开时调用）— 分页模式无需特殊处理
 void ui_shop_stop_fill(void)
 {
-    if (s_shop_fill_timer) {
-        lv_timer_del(s_shop_fill_timer);
-        s_shop_fill_timer = NULL;
-    }
+    // 分页模式不需要停止 timer，保留接口兼容性
 }
 
 void ui_screen_shop_create(void)
@@ -979,17 +1159,49 @@ void ui_screen_shop_create(void)
     lv_obj_set_style_text_font(g_shop_coin_lbl, &lv_font_montserrat_14, 0);
     lv_label_set_text(g_shop_coin_lbl, "$ 0");
 
-    // Shop scrollable list container
+    // Shop grid container (scrollable within page, paginated across pages)
     g_shop_grid = lv_obj_create(g_shop_screen);
-    lv_obj_set_size(g_shop_grid, 352, 390);
+    lv_obj_set_size(g_shop_grid, 352, 340);
     lv_obj_set_pos(g_shop_grid, 8, 56);
     lv_obj_set_style_bg_opa(g_shop_grid, LV_OPA_0, 0);
     lv_obj_set_style_border_width(g_shop_grid, 0, 0);
+    lv_obj_set_style_shadow_width(g_shop_grid, 0, 0);
+    lv_obj_set_style_pad_all(g_shop_grid, 4, 0);
     lv_obj_set_flex_flow(g_shop_grid, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(g_shop_grid, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_START);
     lv_obj_set_style_pad_gap(g_shop_grid, 8, 0);
+    // 分页模式：页内可滚动（每页最多10个item）
     lv_obj_add_flag(g_shop_grid, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_scroll_dir(g_shop_grid, LV_DIR_VER);  // 只允许纵向滚动
+    lv_obj_set_scroll_dir(g_shop_grid, LV_DIR_VER);
+
+    // 底部分页栏
+    s_shop_prev_btn = lv_btn_create(g_shop_screen);
+    lv_obj_set_size(s_shop_prev_btn, 72, 36);
+    lv_obj_set_pos(s_shop_prev_btn, 40, 400);
+    lv_obj_set_style_bg_color(s_shop_prev_btn, lv_color_make(60, 80, 100), 0);
+    lv_obj_set_style_radius(s_shop_prev_btn, 6, 0);
+    lv_obj_t *prev_lbl = lv_label_create(s_shop_prev_btn);
+    lv_obj_center(prev_lbl);
+    lv_obj_set_style_text_color(prev_lbl, lv_color_white(), 0);
+    lv_label_set_text(prev_lbl, "< Prev");
+    lv_obj_add_event_cb(s_shop_prev_btn, btn_shop_prev_cb, LV_EVENT_CLICKED, NULL);
+
+    s_shop_page_lbl = lv_label_create(g_shop_screen);
+    lv_obj_set_pos(s_shop_page_lbl, 160, 408);
+    lv_obj_set_style_text_color(s_shop_page_lbl, lv_color_white(), 0);
+    lv_obj_set_style_text_font(s_shop_page_lbl, &lv_font_montserrat_14, 0);
+    lv_label_set_text(s_shop_page_lbl, "1 / 1");
+
+    s_shop_next_btn = lv_btn_create(g_shop_screen);
+    lv_obj_set_size(s_shop_next_btn, 72, 36);
+    lv_obj_set_pos(s_shop_next_btn, 248, 400);
+    lv_obj_set_style_bg_color(s_shop_next_btn, lv_color_make(60, 80, 100), 0);
+    lv_obj_set_style_radius(s_shop_next_btn, 6, 0);
+    lv_obj_t *next_lbl = lv_label_create(s_shop_next_btn);
+    lv_obj_center(next_lbl);
+    lv_obj_set_style_text_color(next_lbl, lv_color_white(), 0);
+    lv_label_set_text(next_lbl, "Next >");
+    lv_obj_add_event_cb(s_shop_next_btn, btn_shop_next_cb, LV_EVENT_CLICKED, NULL);
 }
 
 void ui_screen_shop_show(const struct game_save *save)
@@ -1008,8 +1220,9 @@ void ui_screen_shop_show(const struct game_save *save)
         ESP_LOGW(TAG, "Shop coin_lbl=%p, save=%p", g_shop_coin_lbl, save);
     }
 
-    // Fill items in batches to avoid WDT
-    shop_fill_list(save);
+    // 分页模式：回到第一页并填充
+    s_shop_current_page = 0;
+    shop_fill_page();
 
     lv_scr_load(g_shop_screen);
 }

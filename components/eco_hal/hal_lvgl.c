@@ -189,13 +189,14 @@ void hal_lvgl_port_task(void *arg)
 
     esp_task_wdt_add(NULL);
 
-        int loop_count = 0;
+    int loop_count = 0;
     while (1) {
         
         esp_task_wdt_reset();
 
         // UI 更新
         if (s_ui_update_cb) s_ui_update_cb();
+
         uint32_t task_delay_ms = lv_timer_handler();
         if (task_delay_ms > 500) {
             task_delay_ms = 500;

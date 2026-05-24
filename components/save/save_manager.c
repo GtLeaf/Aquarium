@@ -3,6 +3,9 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 #include <string.h>
 #include <stdlib.h>
 #include <time.h>
@@ -11,6 +14,14 @@ static const char *TAG = "save_manager";
 static nvs_handle_t g_nvs_handle = 0;
 static uint32_t s_auto_save_timer = 0;
 static uint8_t s_retry_count = 0;
+
+// ========== 异步存档任务 ==========
+#define SAVE_TASK_STACK_SIZE  4096
+#define SAVE_TASK_PRIORITY    2        // 低于 lvgl_task(5) 和 main(5)
+
+static TaskHandle_t      s_save_task_handle = NULL;
+static SemaphoreHandle_t s_save_mutex       = NULL;
+static struct game_save  s_save_buffer;     // 双缓冲：主线程写 → 存档线程读
 
 // CRC32 查找表（IEEE 802.3 多项式）
 static const uint32_t crc32_table[256] = {
@@ -265,7 +276,21 @@ void save_auto_save_tick(uint32_t dt_ms, const struct game_save *save)
     s_auto_save_timer += dt_ms;
     if (s_auto_save_timer >= AUTO_SAVE_INTERVAL_MS) {
         s_auto_save_timer = 0;
-        save_auto_save(save);
+
+        // 如果异步任务未启动，回退到同步写入
+        if (!s_save_task_handle) {
+            save_auto_save(save);
+            return;
+        }
+
+        // 将当前存档数据拷贝到缓冲区，然后通知存档任务
+        if (xSemaphoreTake(s_save_mutex, 0) == pdTRUE) {
+            memcpy(&s_save_buffer, save, sizeof(s_save_buffer));
+            xSemaphoreGive(s_save_mutex);
+            xTaskNotifyGive(s_save_task_handle);
+        } else {
+            ESP_LOGW(TAG, "save buffer busy, skip this save cycle");
+        }
     }
 }
 
@@ -311,4 +336,49 @@ esp_err_t save_gamesave_delete(void)
         ESP_LOGI(TAG, "Game save deleted");
     }
     return ret;
+}
+
+// ========== 异步存档任务实现 ==========
+
+static void save_task(void *arg)
+{
+    (void)arg;
+    for (;;) {
+        // 阻塞等待通知（来自 save_auto_save_tick）
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+        // 在互斥锁下拷贝数据到本地栈变量
+        struct game_save local_copy;
+        if (xSemaphoreTake(s_save_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            memcpy(&local_copy, &s_save_buffer, sizeof(local_copy));
+            xSemaphoreGive(s_save_mutex);
+        } else {
+            ESP_LOGW(TAG, "mutex timeout, skip this save cycle");
+            continue;
+        }
+
+        // 执行耗时的 NVS 写入（此时不阻塞主线程）
+        save_gamesave_write(&local_copy);
+        ESP_LOGI(TAG, "async save completed");
+    }
+}
+
+void save_manager_start_task(void)
+{
+    if (s_save_task_handle) return;  // 防止重复创建
+
+    s_save_mutex = xSemaphoreCreateMutex();
+    assert(s_save_mutex);
+
+    BaseType_t ret = xTaskCreatePinnedToCore(
+        save_task,
+        "save_task",
+        SAVE_TASK_STACK_SIZE,
+        NULL,
+        SAVE_TASK_PRIORITY,
+        &s_save_task_handle,
+        1              // 绑定到 CPU1（与 lvgl_task 分开）
+    );
+    assert(ret == pdPASS);
+    ESP_LOGI(TAG, "async save task started on CPU1");
 }

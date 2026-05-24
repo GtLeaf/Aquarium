@@ -10,7 +10,7 @@
 
 - **芯片目标**：ESP32-S3（双核 Xtensa LX7，主频 240MHz）
 - **屏幕**：1.8 英寸 AMOLED，分辨率 368×448，驱动芯片 SH8601，QSPI 接口
-- **交互**：FT3168 电容触摸（I2C）、QMI8658 六轴 IMU（I2C）、模拟麦克风 + ES8311 音频（I2S）
+- **交互**：FT3168 电容触摸（I2C）、QMI8658 六轴 IMU（I2C）、PWM 蜂鸣器（GPIO40）
 - **电源管理**：AXP2101 PMU（I2C）+ 锂电池
 - **RTC**：PCF85063（I2C）
 - **项目根目录**：`d:\Study\ESP32\hello_world`
@@ -65,11 +65,11 @@ hello_world/
 │   │   ├── hal_pmu.c           # AXP2101 电源管理（ALDO1/2/4 供电配置）
 │   │   ├── hal_rtc.c           # PCF85063 RTC
 │   │   ├── hal_imu.c           # QMI8658 六轴 IMU
-│   │   ├── hal_audio.c         # ES8311 I2S 音频
+│   │   ├── hal_audio.c         # PWM 蜂鸣器驱动（GPIO40，LEDC）
 │   │   └── include/*.h
 │   ├── engine/                 # 游戏引擎与核心逻辑
 │   │   ├── engine_main.c       # 引擎初始化、状态机、离线收益、存档 dirty 标记
-│   │   ├── engine_logic.c      # 生态心跳（1Hz）：环境更新、觅食、成长、衰减
+│   │   ├── engine_logic.c      # 生态心跳（1Hz）：环境更新、成长、衰减
 │   │   ├── event_system.c      # 24 种随机事件的触发、冷却、每日上限
 │   │   ├── achievement_system.c# 成就系统
 │   │   └── include/*.h
@@ -91,7 +91,7 @@ hello_world/
 │   └── waveshare__esp_lcd_sh8601/
 ├── doc/                        # 项目文档（中文）
 │   ├── BUILD_GUIDE.md          # Windows PowerShell 构建与烧录命令
-│   ├── debug_notes.md          # 硬件 bring-up 排障记录（I2C/触摸/颜色/栈溢出）
+│   ├── debug_notes.md          # 硬件 bring-up 排障记录（I2C/触摸/颜色/栈溢出/WDT）
 │   ├── 像素生态缸_PRD_v0.4_2026-05-20.md  # 产品需求文档（30 物种、事件系统、数值）
 │   ├── species.csv             # 物种配置基线
 │   └── events.csv              # 事件配置基线
@@ -122,7 +122,7 @@ main
 3. `hal_pmu_init()` — AXP2101 供电（ALDO1/2/4），失败仅警告，继续启动
 4. `hal_display_init()` — QSPI + SH8601 面板点亮
 5. `hal_touch_init()` — FT3168 触摸初始化（含 PCA9554 P2 复位），失败仅警告
-6. `hal_audio_init()` — ES8311 I2S 音频
+6. `hal_audio_init()` — PWM 蜂鸣器初始化（LEDC，GPIO40）
 7. `hal_lvgl_init()` — LVGL 显示端口配置
 8. `engine_init()` — 读取存档、计算离线收益、初始化事件与成就系统
 9. `ui_init()` — 创建 LVGL 屏幕对象树（此时无渲染任务，线程安全）
@@ -138,11 +138,13 @@ main
 
 **注意**：UI 初始化（`ui_init()`）在 LVGL 任务启动前完成，避免对象树创建与渲染的竞态。
 
+**⚠️ 线程安全（已知问题）**：`main` 任务和 `lvgl_task` 都会调用 LVGL API，但当前代码**未启用 FreeRTOS OSAL**，也未使用 `lv_lock()` / `lv_unlock()` 保护。这可能导致两个任务并发访问 LVGL 内部数据结构时触发 WDT。临时规避方案：商店/图鉴使用分批异步加载（`SHOP_BATCH_SIZE=3`），减少单次渲染对象数。
+
 ### 4.3 主循环时序（`engine_tick()`）
 
 - **每 16ms**：调用一次，累计帧计数
 - **每 1000ms（1 秒）**：
-  - `engine_logic_update()` — 生态心跳（环境、觅食、成长、衰减）
+  - `engine_logic_update()` — 生态心跳（环境、成长、衰减）
   - `event_system_tick()` — 随机事件检查
   - `engine_try_breed()` — 繁殖判定（每 5 分钟一次实际尝试）
   - `achievement_check()` — 成就检查（每 10 秒一次）
@@ -270,6 +272,7 @@ C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe D:\softwareInstall\ESPI
 - **AXP2101 LDO**：ALDO1（RTC/IMU）、ALDO2（FT3168 触摸）、ALDO4（显示屏/TF 卡）。
 - **颜色格式**：AMOLED 必须使用 `LV_COLOR_FORMAT_RGB565_SWAPPED`，否则颜色通道错位（见 `doc/debug_notes.md` §2）。
 - **触摸复位**：FT3168 的 RST 不直接连 GPIO，而是通过 PCA9554（I2C 0x20）的 P2 引脚控制。
+- **音频**：PWM 蜂鸣器接 GPIO40，使用 LEDC 驱动，非 I2S/ES8311。
 
 ---
 
@@ -304,6 +307,7 @@ C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe D:\softwareInstall\ESPI
 - **任务看门狗**：`CONFIG_ESP_TASK_WDT_TIMEOUT_S=10`，防止 LVGL 大面积渲染时触发复位。
 - **栈溢出**：主任务栈已增加到 8192 字节。
 - **NULL 检查**：引擎和存档函数普遍检查指针参数；HAL 层对 `io_handle` / `panel_handle` 做空指针保护。
+- **线程安全（已知问题）**：`main` 任务与 `lvgl_task` 并发访问 LVGL API **未加锁保护**，存在竞态条件风险。触发 WDT 时检查堆栈：若卡在 `lv_inv_area` 且运行任务为 `main`，即为该问题。
 
 ### 8.3 数据校验
 
@@ -338,11 +342,32 @@ C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe D:\softwareInstall\ESPI
 | 颜色异常（青/黄） | LVGL 颜色格式是否为 `RGB565_SWAPPED` | `doc/debug_notes.md` §2 |
 | 触摸无响应 | PCA9554 P2 复位序列；FT3168 工作模式 0x00 | `doc/debug_notes.md` §3 |
 | 栈溢出重启 | 主任务栈是否 ≥ 8192 | `doc/debug_notes.md` §4 |
+| WDT 触发（main 任务） | `main` 任务是否未加锁调用 LVGL API | `doc/debug_notes.md` §5 |
+| WDT 触发（lvgl_task） | 单次渲染对象是否过多；是否使用分批加载 | `doc/debug_notes.md` §5 |
 | 构建失败（找不到 cmake） | 环境变量 PATH 是否包含 cmake 和 ninja | `doc/BUILD_GUIDE.md` §6 |
 
 ---
 
-## 10. 文件修改禁忌
+## 10. 已知问题与限制
+
+### 10.1 食物链未实现
+
+当前 `engine_logic.c` 中 **没有实现捕食逻辑**：
+- L1 生产者：不饥饿，不会死亡（除非摇晃事件）
+- L2/L3/L4 消费者：会饥饿，但 **不会主动捕食**，只能通过摇晃事件（`SHAKE_EFFECT_FEED`）降低饥饿值
+- 若需实现食物链，需在 `update_creatures()` 中添加：L2 消耗藻类、L3/L4 捕食低营养级生物
+
+### 10.2 商店分批加载
+
+商店使用 **分批异步加载**（每 30ms 创建 3 个卡片），而非虚拟列表。进入商店时会看到卡片逐批出现。返回主界面时调用 `ui_shop_stop_fill()` 停止未完成的加载。
+
+### 10.3 图鉴同样使用分批加载
+
+图鉴屏幕与商店类似，使用 `COLLECTION_BATCH_SIZE` 分批创建卡片，避免一次性创建 30 个对象触发 WDT。
+
+---
+
+## 11. 文件修改禁忌
 
 - **不要手动修改 `sdkconfig`**：应通过 `idf.py menuconfig` 修改，或在 `sdkconfig.defaults` 中添加默认值。
 - **不要修改 `managed_components/` 下的文件**：这些由 Component Manager 自动管理，会被覆盖。

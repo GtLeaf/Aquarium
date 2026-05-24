@@ -50,6 +50,9 @@ esp_err_t save_import_blob(const uint8_t *buf, size_t len, struct game_save *sav
 // 删除存档（重置游戏）
 esp_err_t save_gamesave_delete(void);
 
+// 启动异步存档任务（低优先级），需在 app_main 初始化阶段调用一次
+void save_manager_start_task(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -87,6 +87,9 @@ void app_main(void)
     ESP_ERROR_CHECK(engine_init());
     ESP_LOGI(TAG, "Engine OK");
 
+    // 启动异步存档任务（低优先级，绑定 CPU1）
+    save_manager_start_task();
+
     // 3. 初始化 UI（创建 LVGL 对象树，此时还没有 LVGL 渲染任务运行，线程安全）
     ESP_LOGI(TAG, "[11/11] Initializing UI...");
     ESP_ERROR_CHECK(ui_init());
