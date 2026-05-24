@@ -133,9 +133,14 @@ static void update_creatures(struct game_context *ctx)
     ctx->dirty = true;
 }
 
-// 摇晃效果处理
+// 摇晃效果处理（降频到每 100ms 检测一次，避免每帧 I2C 读取）
 static void apply_shake_effect(struct game_context *ctx)
 {
+    static uint32_t s_imu_check_timer = 0;
+    s_imu_check_timer += ENGINE_TICK_MS;
+    if (s_imu_check_timer < 100) return;  // 每 100ms 检测一次
+    s_imu_check_timer = 0;
+
     shake_level_t shake = hal_imu_detect_shake();
     if (shake == SHAKE_NONE) return;
 

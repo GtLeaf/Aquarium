@@ -105,6 +105,7 @@ void app_main(void)
 
     while (1) {
         engine_tick();
+        ui_update();  // UI 更新在主任务中执行，避免阻塞 LVGL 渲染
         vTaskDelay(pdMS_TO_TICKS(ENGINE_TICK_MS));
     }
 }

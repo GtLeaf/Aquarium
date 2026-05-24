@@ -117,7 +117,7 @@ esp_err_t hal_imu_init(void)
 }
 
 // 摇晃冷却时间（ms），避免连续触发
-#define SHAKE_COOLDOWN_MS 1000
+#define SHAKE_COOLDOWN_MS 3000
 
 shake_level_t hal_imu_detect_shake(void)
 {
