@@ -255,6 +255,16 @@ bool engine_buy_species(struct game_save *save, uint8_t species_id)
     // 检查是否已解锁图鉴
     if (!engine_is_species_unlocked(save, species_id)) return false;
 
+    // PRD §4: L4A 全局上限 2 只（跨物种）
+    if (sp->trophic_level == TROPHIC_L4A) {
+        uint8_t l4a_count = 0;
+        for (int i = 0; i < save->creature_count; i++) {
+            const struct species_def *cs = species_get_by_id(save->creatures[i].species_id);
+            if (cs && cs->trophic_level == TROPHIC_L4A) l4a_count++;
+        }
+        if (l4a_count >= 2) return false;
+    }
+
     // 检查同种数量上限
     uint8_t same_count = 0;
     for (int i = 0; i < save->creature_count; i++) {
@@ -287,46 +297,78 @@ void engine_try_breed(struct game_save *save)
 {
     if (!save || save->creature_count >= MAX_CREATURES) return;
 
-    // 每 5 分钟尝试一次繁殖
+    // PRD §4.9: 每 5 分钟尝试一次繁殖
     static uint32_t breed_timer = 0;
     breed_timer++;
     if (breed_timer < 300) return; // 300 秒 = 5 分钟
     breed_timer = 0;
 
-    // 寻找可繁殖的成对生物
+    // PRD §4.9: 每日每种最多繁殖 1 次
+    // 使用 total_seconds / 86400 作为"天"标识
+    static uint32_t s_last_breed_day = 0;
+    static uint8_t  s_breed_species_today[MAX_SPECIES + 1]; // 今天已繁殖的物种标记
+    uint32_t current_day = save->env.total_seconds / 86400;
+    if (current_day != s_last_breed_day) {
+        s_last_breed_day = current_day;
+        memset(s_breed_species_today, 0, sizeof(s_breed_species_today));
+    }
+
+    // 寻找可繁殖的成对生物（PRD §4.9: 需要两只同种成年体）
     for (int i = 0; i < save->creature_count; i++) {
-        struct creature *parent = &save->creatures[i];
-        if (parent->stage != STAGE_ADULT && parent->stage != STAGE_GIANT) continue;
-        if (parent->mood < 80) continue;
-        if (parent->state != 0) continue;
+        struct creature *parent_a = &save->creatures[i];
+        if (parent_a->stage != STAGE_ADULT && parent_a->stage != STAGE_GIANT) continue;
+        if (parent_a->hunger >= 30) continue; // PRD: 饱食度>70 即 hunger<30
+        if (parent_a->state != 0) continue;
 
-        const struct species_def *sp = species_get_by_id(parent->species_id);
+        const struct species_def *sp = species_get_by_id(parent_a->species_id);
         if (!sp) continue;
-        if (sp->trophic_level == TROPHIC_L4A || sp->trophic_level == TROPHIC_L4B) continue; // L4 不繁殖
+        // L4 不繁殖
+        if (sp->trophic_level == TROPHIC_L4A || sp->trophic_level == TROPHIC_L4B) continue;
 
-        // 检查同种数量
+        // 今天该物种已繁殖过则跳过
+        if (parent_a->species_id <= MAX_SPECIES && s_breed_species_today[parent_a->species_id]) continue;
+
+        // PRD §4.9: 需要第二只同种成年个体
+        bool has_partner = false;
+        for (int j = 0; j < save->creature_count; j++) {
+            if (j == i) continue;
+            struct creature *parent_b = &save->creatures[j];
+            if (parent_b->species_id != parent_a->species_id) continue;
+            if (parent_b->stage != STAGE_ADULT && parent_b->stage != STAGE_GIANT) continue;
+            if (parent_b->hunger >= 30) continue; // 配偶也需饱食
+            if (parent_b->state != 0) continue;
+            has_partner = true;
+            break;
+        }
+        if (!has_partner) continue;
+
+        // 检查同种数量上限
         uint8_t same_count = 0;
         for (int j = 0; j < save->creature_count; j++) {
-            if (save->creatures[j].species_id == parent->species_id) same_count++;
+            if (save->creatures[j].species_id == parent_a->species_id) same_count++;
         }
         if (same_count >= sp->max_per_tank) continue;
 
         // 30% 概率繁殖
         if ((esp_random() % 100) < 30) {
             struct creature *baby = &save->creatures[save->creature_count];
-            baby->species_id = parent->species_id;
+            baby->species_id = parent_a->species_id;
             baby->stage = STAGE_JUVENILE;
             baby->size = sp->size_base / 2;
             if (baby->size < 3) baby->size = 3;
-            baby->pos_x = parent->pos_x + (int8_t)((esp_random() % 10) - 5);
-            baby->pos_y = parent->pos_y + (int8_t)((esp_random() % 10) - 5);
+            baby->pos_x = parent_a->pos_x + (int8_t)((esp_random() % 10) - 5);
+            baby->pos_y = parent_a->pos_y + (int8_t)((esp_random() % 10) - 5);
             baby->hunger = 10;
             baby->mood = 100;
             baby->state = 0;
             save->creature_count++;
 
-            parent->mood -= 20; // 繁殖后心情下降
-            ESP_LOGI(TAG, "Breed success: %s baby born!", sp->name);
+            // 标记今天该物种已繁殖
+            if (parent_a->species_id <= MAX_SPECIES) {
+                s_breed_species_today[parent_a->species_id] = 1;
+            }
+
+            ESP_LOGI(TAG, "Breed success: %s baby born! (day %lu)", sp->name, (unsigned long)current_day);
             engine_mark_dirty();
             break; // 每次只繁殖一只
         }

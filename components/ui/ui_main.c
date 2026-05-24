@@ -166,6 +166,11 @@ void ui_navigate_home(void)
     ui_shop_stop_fill();
     ui_collection_stop_fill();
 
+    // 关闭可能残留的弹窗（否则 g_popup_visible 阻塞 ui_screen_main_update）
+    if (ui_popup_is_visible()) {
+        ui_popup_close();
+    }
+
     ui_screen_shop_hide();
     ui_screen_settings_hide();
     ui_screen_collection_hide();
@@ -179,5 +184,11 @@ void ui_navigate_home(void)
     lv_obj_t *main = ui_get_main_screen();
     if (main) {
         lv_scr_load(main);
+    }
+
+    // 立即刷新一帧主界面（让新购入的生物马上显示）
+    struct game_context *ctx = engine_get_context();
+    if (ctx) {
+        ui_screen_main_update(ctx);
     }
 }

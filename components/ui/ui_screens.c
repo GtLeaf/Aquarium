@@ -961,6 +961,49 @@ static lv_obj_t   *s_shop_page_lbl = NULL;
 static lv_obj_t   *s_shop_prev_btn = NULL;
 static lv_obj_t   *s_shop_next_btn = NULL;
 
+// 按钮上方提示文字渐隐动画：opacity 从 255 -> 0
+static void shop_tip_fade_anim_cb(void *obj, int32_t val)
+{
+    lv_obj_set_style_text_opa((lv_obj_t *)obj, (lv_opa_t)val, 0);
+}
+
+// 渐隐结束后删除提示 label
+static void shop_tip_fade_done_cb(lv_anim_t *a)
+{
+    lv_obj_t *lbl = (lv_obj_t *)a->var;
+    if (lbl) lv_obj_del(lbl);
+}
+
+static void shop_btn_show_feedback(lv_obj_t *btn, const char *text, bool success)
+{
+    // 在按钮上方创建浮动提示文字
+    lv_obj_t *card = lv_obj_get_parent(btn);
+    if (!card) return;
+
+    lv_obj_t *tip = lv_label_create(card);
+    lv_label_set_text(tip, text);
+    lv_obj_set_style_text_font(tip, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(tip,
+        success ? lv_color_make(0, 230, 100) : lv_color_make(255, 80, 80), 0);
+    lv_obj_set_style_text_opa(tip, LV_OPA_COVER, 0);
+
+    // 放在按钮正上方
+    lv_coord_t btn_x = lv_obj_get_x(btn);
+    lv_coord_t btn_y = lv_obj_get_y(btn);
+    lv_obj_set_pos(tip, btn_x + 15, btn_y - 20);
+
+    // 创建渐隐动画：延迟 1s 后开始，1s 内从 255→0，结束后自动删除
+    lv_anim_t anim;
+    lv_anim_init(&anim);
+    lv_anim_set_var(&anim, tip);
+    lv_anim_set_values(&anim, LV_OPA_COVER, LV_OPA_TRANSP);
+    lv_anim_set_duration(&anim, 1000);
+    lv_anim_set_delay(&anim, 1000);
+    lv_anim_set_exec_cb(&anim, shop_tip_fade_anim_cb);
+    lv_anim_set_ready_cb(&anim, shop_tip_fade_done_cb);
+    lv_anim_start(&anim);
+}
+
 static void btn_shop_buy_cb(lv_event_t *e)
 {
     lv_obj_t *btn = lv_event_get_target(e);
@@ -973,15 +1016,13 @@ static void btn_shop_buy_cb(lv_event_t *e)
     if (!sp) return;
 
     if (!engine_is_species_unlocked(&ctx->save, (uint8_t)species_id)) {
-        ui_popup_show_reward("Locked", "Species not unlocked yet. Trigger via events.");
+        shop_btn_show_feedback(btn, "Locked", false);
         hal_audio_play(SOUND_WARNING);
         return;
     }
 
     if (engine_buy_species(&ctx->save, (uint8_t)species_id)) {
-        char msg[64];
-        snprintf(msg, sizeof(msg), "Got: %s", sp->name);
-        ui_popup_show_reward("Purchase Success", msg);
+        shop_btn_show_feedback(btn, "OK!", true);
         hal_audio_play(SOUND_REWARD);
         // Update coin display
         if (g_shop_coin_lbl) {
@@ -990,7 +1031,7 @@ static void btn_shop_buy_cb(lv_event_t *e)
             lv_label_set_text(g_shop_coin_lbl, buf);
         }
     } else {
-        ui_popup_show_reward("Purchase Failed", "Not enough coins or creature limit reached");
+        shop_btn_show_feedback(btn, "Failed", false);
         hal_audio_play(SOUND_WARNING);
     }
 }
