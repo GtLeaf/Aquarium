@@ -8,67 +8,101 @@
 
 static const char *TAG = "engine_logic";
 
+// 逻辑帧计数器：60帧(ENGINE_TICK_MS=16)才执行一次1秒逻辑
+static uint32_t s_logic_tick = 0;
+#define LOGIC_INTERVAL  (1000 / ENGINE_TICK_MS)  // ≈62帧 = 1秒
+
 // ============================================================
-// §4.3 环境层更新
+// §4.3 环境层更新 (每秒调用一次)
 // ============================================================
 static void update_environment(struct game_context *ctx)
 {
     struct environment *env = &ctx->save.env;
 
-    // 日夜循环（简化：每 5 分钟切换）
+    // 总时间 +1 秒
     env->total_seconds++;
+
+    // 日夜循环：每 5 分钟切换
     if (env->total_seconds % 300 == 0) {
         env->is_daytime = !env->is_daytime;
     }
 
-    // §4.3 阳光：白天 +1/min，夜晚 -0.5/min
-    // 心跳每秒一次，所以 +1/min = 每60s +1
+    // §4.3 阳光：白天每分钟 +1，夜晚每2分钟 -1
     if (env->total_seconds % 60 == 0) {
         if (env->is_daytime) {
             if (env->sunlight < 100) env->sunlight++;
-        } else {
-            // -0.5/min => 每 120s -1
         }
     }
     if (!env->is_daytime && (env->total_seconds % 120 == 0)) {
         if (env->sunlight > 0) env->sunlight--;
     }
 
-    // §4.3 营养：被 L1 消耗 -0.2/min·棵
-    // 统计 L1 数量（包括藻类 algae_mass 作为虚拟棵数）
-    uint8_t l1_count = 0;
-    for (int i = 0; i < ctx->save.creature_count; i++) {
-        const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
-        if (sp && sp->trophic_level == TROPHIC_L1) l1_count++;
-    }
-    // algae_mass/20 作为等效 L1 棵数 (0-5棵)
-    uint8_t total_l1 = l1_count + (env->algae_mass / 20);
-    // -0.2/min·棵 => 每 5s 每棵 -0.0167 => 每 300s(5min) 每棵 -1
-    if (total_l1 > 0 && (env->total_seconds % (300 / total_l1 + 1) == 0)) {
-        if (env->nutrients > 0) env->nutrients--;
-    }
-
-    // §4.4 藻类 Logistic 生长: ΔBiomass = k1 × 阳光 × 营养 × (1 - Biomass/Capacity)
-    // 每分钟计算一次
-    if (env->total_seconds % 60 == 0) {
-        uint16_t growth = (uint16_t)env->sunlight * env->nutrients * (100 - env->algae_mass) / 100000;
-        if (growth < 1 && env->algae_mass < 50 && env->sunlight > 30 && env->nutrients > 30) {
-            growth = 1;
+    // §4.4 algae_mass = 缸内所有 L1 植物 size 之和（只读快照，驱动产氧）
+    if (env->total_seconds % 10 == 0) {
+        uint16_t total_plant_size = 0;
+        for (int i = 0; i < ctx->save.creature_count; i++) {
+            const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
+            if (sp && sp->trophic_level == TROPHIC_L1) {
+                total_plant_size += ctx->save.creatures[i].size;
+            }
         }
-        if (env->algae_mass + growth > 100) growth = 100 - env->algae_mass;
-        env->algae_mass += (uint8_t)growth;
+        // 映射：总 size 200 → algae_mass 100
+        env->algae_mass = (uint8_t)(total_plant_size > 200 ? 100 : total_plant_size * 100 / 200);
     }
 
-    // §4.3 氧气：L1 光合产氧，L2/L3/L4 按 oxygen_demand 消耗
+    // §4.4 L1 植物生长：每分钟，根据 light_pref + nutrient 增长
+    if (env->total_seconds % 60 == 0) {
+        for (int i = 0; i < ctx->save.creature_count; i++) {
+            struct creature *plant = &ctx->save.creatures[i];
+            const struct species_def *sp = species_get_by_id(plant->species_id);
+            if (!sp || sp->trophic_level != TROPHIC_L1) continue;
+            if (plant->size >= sp->size_cap) continue;
+
+            // 光照需求匹配
+            bool light_ok = false;
+            switch (sp->light_pref) {
+                case PREF_LOW:    light_ok = (env->sunlight > 10); break;
+                case PREF_MEDIUM: light_ok = (env->sunlight > 30); break;
+                case PREF_HIGH:   light_ok = (env->sunlight > 50); break;
+                default:          light_ok = true; break;
+            }
+
+            // 营养需求匹配
+            bool nut_ok = false;
+            switch (sp->nutrient_need) {
+                case PREF_LOW:    nut_ok = (env->nutrients > 5);  break;
+                case PREF_MEDIUM: nut_ok = (env->nutrients > 15); break;
+                case PREF_HIGH:   nut_ok = (env->nutrients > 30); break;
+                default:          nut_ok = true; break;
+            }
+
+            if (light_ok && nut_ok) {
+                // grow_factor 决定单次增长量
+                uint8_t growth = sp->grow_factor > 0 ? sp->grow_factor : 1;
+                if (plant->size + growth <= sp->size_cap) {
+                    plant->size += growth;
+                } else {
+                    plant->size = sp->size_cap;
+                }
+                // 消耗营养
+                uint8_t cost = (sp->nutrient_need == PREF_HIGH) ? 3 :
+                               (sp->nutrient_need == PREF_MEDIUM) ? 2 : 1;
+                if (env->nutrients >= cost) env->nutrients -= cost;
+                else env->nutrients = 0;
+            }
+        }
+    }
+
+    // §4.3 氧气平衡：L1 光合产氧，动物按 oxygen_demand 耗氧
     if (env->total_seconds % 10 == 0) {
         int16_t o2 = env->oxygen;
-        // 产氧：藻类生物量 / 10
+        // 产氧：algae_mass / 10（每10秒）
         o2 += (env->algae_mass / 10);
-        // 耗氧：每个生物按 oxygen_demand
+        // 耗氧：非L1生物 oxygen_demand / 5（每10秒）
         for (int i = 0; i < ctx->save.creature_count; i++) {
             const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
             if (sp && sp->trophic_level != TROPHIC_L1) {
-                o2 -= (sp->oxygen_demand / 5); // 每10s消耗 demand/5
+                o2 -= (sp->oxygen_demand / 5);
             }
         }
         if (o2 > 100) o2 = 100;
@@ -83,70 +117,205 @@ static void update_environment(struct game_context *ctx)
 // §4.5/4.6/4.7 觅食AI
 // ============================================================
 
-// 计算两个生物之间的距离
+// 曼哈顿距离
 static uint16_t creature_distance(const struct creature *a, const struct creature *b)
 {
     int16_t dx = (int16_t)a->pos_x - (int16_t)b->pos_x;
     int16_t dy = (int16_t)a->pos_y - (int16_t)b->pos_y;
-    return (uint16_t)(abs(dx) + abs(dy)); // 曼哈顿距离
+    return (uint16_t)(abs(dx) + abs(dy));
 }
 
-// L2 啃食藻类 (L1 algae_mass)
-static void forage_l2(struct game_context *ctx, struct creature *c)
+// 检查 species_id 是否在食谱数组中
+static bool is_in_diet(const uint8_t diet[MAX_PREY_SLOTS], uint8_t species_id)
 {
-    // §4.5: hunger每分钟+0.5 => 每120s +1
-    // 觅食优先 L1 藻类
-    if (c->hunger > 20 && ctx->save.env.algae_mass > 5) {
-        // 进食：每秒 hunger -2，藻类 -0.1
-        if (c->hunger >= 2) c->hunger -= 2;
-        else c->hunger = 0;
-        // 藻类减少（每10次减1防止过快）
-        static uint8_t eat_counter = 0;
-        eat_counter++;
-        if (eat_counter >= 10) {
-            eat_counter = 0;
-            if (ctx->save.env.algae_mass > 0) ctx->save.env.algae_mass--;
+    for (int k = 0; k < MAX_PREY_SLOTS; k++) {
+        if (diet[k] == 0) break;
+        if (diet[k] == species_id) return true;
+    }
+    return false;
+}
+
+// ─── L2 觅食：啃食 L1 植物实例 ───
+static void forage_l2(struct game_context *ctx, struct creature *c, const struct species_def *sp)
+{
+    if (c->hunger < 20) return; // 不太饿就不吃
+
+    int best_idx = -1;
+    uint16_t best_dist = 255;
+
+    for (int j = 0; j < ctx->save.creature_count; j++) {
+        struct creature *plant = &ctx->save.creatures[j];
+        if (plant == c) continue;
+        if (plant->state != 0) continue;
+
+        // 必须是 L1 植物
+        const struct species_def *plant_sp = species_get_by_id(plant->species_id);
+        if (!plant_sp || plant_sp->trophic_level != TROPHIC_L1) continue;
+
+        // 检查主食 eats[] 或备选 alt_eats[]
+        bool can_eat = is_in_diet(sp->eats, plant->species_id) ||
+                       is_in_diet(sp->alt_eats, plant->species_id);
+        if (!can_eat) continue;
+
+        uint16_t dist = creature_distance(c, plant);
+        if (dist < best_dist) {
+            best_dist = dist;
+            best_idx = j;
         }
-        // 成长点
-        c->growth_pts++;
+    }
+
+    if (best_idx >= 0) {
+        struct creature *plant = &ctx->save.creatures[best_idx];
+
+        // 朝植物移动（L2 速度较慢）
+        if (plant->pos_x > c->pos_x) { c->vel_x = 1; c->facing_right = true; }
+        else if (plant->pos_x < c->pos_x) { c->vel_x = -1; c->facing_right = false; }
+        if (plant->pos_y > c->pos_y) c->vel_y = 1;
+        else if (plant->pos_y < c->pos_y) c->vel_y = -1;
+
+        // 接触判定：距离 < 10 才啃食
+        if (best_dist < 10) {
+            // 啃食效果
+            uint8_t relief = 5; // 基础饥饿缓解
+            if (c->hunger >= relief) c->hunger -= relief;
+            else c->hunger = 0;
+            c->growth_pts++;
+
+            // 植物缩小
+            if (plant->size > 1) {
+                plant->size--;
+            } else {
+                // 植物被吃光 → 释放少量营养到环境，移除实例
+                const struct species_def *plant_sp = species_get_by_id(plant->species_id);
+                if (plant_sp) {
+                    ctx->save.env.nutrients += plant_sp->size_base / 3;
+                    if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
+                }
+                if (best_idx < ctx->save.creature_count - 1) {
+                    ctx->save.creatures[best_idx] = ctx->save.creatures[ctx->save.creature_count - 1];
+                }
+                ctx->save.creature_count--;
+                ESP_LOGI(TAG, "L2 %s ate a plant completely", sp->name);
+            }
+        }
+    } else {
+        // 无猎物 → 备选：环境 nutrient 缓解少量饥饿（效率低，每30秒-1）
+        if (c->hunger > 40 && ctx->save.env.nutrients > 20) {
+            if (ctx->save.env.total_seconds % 30 == 0) {
+                if (c->hunger > 0) c->hunger--;
+                ctx->save.env.nutrients--;
+            }
+        }
     }
 }
 
-// L3/L4 捕食AI：寻找半径R内体型 ≤ 自己 0.7 倍的可食目标
+// ─── 猎物逃跑AI：检测附近捕食者，反方向逃跑 ───
+static void prey_flee(struct game_context *ctx, struct creature *prey, const struct species_def *prey_sp)
+{
+    // 只有正常态才逃跑
+    if (prey->state != 0) return;
+    // L1 植物不逃、L4 不需要逃
+    if (prey_sp->trophic_level == TROPHIC_L1) return;
+    if (prey_sp->trophic_level >= TROPHIC_L4A) return;
+
+    // 扫描附近是否有捕食者正在靠近
+    uint8_t flee_radius = 20; // 感知半径
+    int threat_idx = -1;
+    uint16_t closest_dist = 255;
+
+    for (int j = 0; j < ctx->save.creature_count; j++) {
+        struct creature *hunter = &ctx->save.creatures[j];
+        if (hunter == prey) continue;
+        if (hunter->state != 0) continue;
+
+        const struct species_def *hunter_sp = species_get_by_id(hunter->species_id);
+        if (!hunter_sp) continue;
+
+        // 只怕比自己营养级高的，或同级但体型大很多的
+        bool is_threat = false;
+        if (hunter_sp->trophic_level > prey_sp->trophic_level) {
+            is_threat = true;
+        } else if (hunter_sp->trophic_level == prey_sp->trophic_level &&
+                   hunter_sp->id != prey_sp->id &&
+                   hunter->size > prey->size * 3 / 2) {
+            is_threat = true;
+        }
+        if (!is_threat) continue;
+
+        // 只有捕食者在饥饿状态才构成威胁
+        if (hunter->hunger < 30) continue;
+
+        uint16_t dist = creature_distance(prey, hunter);
+        if (dist < flee_radius && dist < closest_dist) {
+            closest_dist = dist;
+            threat_idx = j;
+        }
+    }
+
+    if (threat_idx < 0) return; // 没有威胁
+
+    struct creature *hunter = &ctx->save.creatures[threat_idx];
+
+    // 反方向逃跑（速度=2，比 L3 追猎慢但比普通游动快）
+    int8_t flee_speed = 2;
+    if (hunter->pos_x > prey->pos_x) { prey->vel_x = -flee_speed; prey->facing_right = false; }
+    else if (hunter->pos_x < prey->pos_x) { prey->vel_x = flee_speed; prey->facing_right = true; }
+    if (hunter->pos_y > prey->pos_y) prey->vel_y = -flee_speed;
+    else if (hunter->pos_y < prey->pos_y) prey->vel_y = flee_speed;
+
+    // 逃跑时随机偏移（避免直线逃跑被预判）
+    if ((esp_random() % 100) < 30) {
+        prey->vel_x += (int8_t)((esp_random() % 3) - 1);
+        prey->vel_y += (int8_t)((esp_random() % 3) - 1);
+    }
+}
+
+// ─── L3/L4 捕食AI：eats[] + alt_eats[] + 体型规则 + L4同级捕食 ───
 static void forage_predator(struct game_context *ctx, struct creature *c, const struct species_def *sp)
 {
-    if (c->hunger < 40) return; // 不饿就不捕食
+    if (c->hunger < 30) return;
 
-    // §4.6: 寻找半径 R=40 内体型 ≤ 自己 0.7 倍的猎物
-    uint8_t hunt_radius = 40;
-    uint8_t size_threshold = (uint8_t)(c->size * 7 / 10);
+    uint8_t hunt_radius = (sp->trophic_level >= TROPHIC_L4A) ? 50 : 35;
     int best_idx = -1;
     uint16_t best_dist = 255;
 
     for (int j = 0; j < ctx->save.creature_count; j++) {
         struct creature *prey = &ctx->save.creatures[j];
         if (prey == c) continue;
-        if (prey->state != 0) continue; // 跳过睡眠/死亡
+        if (prey->state != 0) continue;
 
         const struct species_def *prey_sp = species_get_by_id(prey->species_id);
         if (!prey_sp) continue;
 
-        // 检查食物链关系
+        // 不吃 L1 植物
+        if (prey_sp->trophic_level == TROPHIC_L1) continue;
+
         bool can_eat = false;
-        if (sp->trophic_level == TROPHIC_L3) {
-            // L3 吃 L2，同级别只有体型差>=0.5倍时才吃
-            if (prey_sp->trophic_level == TROPHIC_L2) {
-                can_eat = true;
-            } else if (prey_sp->trophic_level == TROPHIC_L3 && prey->size <= size_threshold) {
-                can_eat = true; // 大鱼吃小鱼
-            }
-        } else if (sp->trophic_level == TROPHIC_L4A || sp->trophic_level == TROPHIC_L4B) {
-            // L4 吃 L3，偶尔吃 L2
-            if (prey_sp->trophic_level == TROPHIC_L3) {
-                can_eat = true;
-            } else if (prey_sp->trophic_level == TROPHIC_L2 && c->hunger > 80) {
-                can_eat = true; // 很饿时才吃 L2
-            }
+
+        // 规则1: eats[] 主食列表
+        if (is_in_diet(sp->eats, prey->species_id)) {
+            can_eat = true;
+        }
+
+        // 规则2: alt_eats[] 备选列表
+        if (!can_eat && is_in_diet(sp->alt_eats, prey->species_id)) {
+            can_eat = true;
+        }
+
+        // 规则3: 低营养级 + 体型 ≤ 自身70%
+        if (!can_eat && prey_sp->trophic_level < sp->trophic_level) {
+            uint8_t size_threshold = (uint8_t)(c->size * 7 / 10);
+            if (prey->size <= size_threshold) can_eat = true;
+        }
+
+        // 规则4: L4 可捕食非同种的较小 L4（体型 ≤ 自身60%）
+        if (!can_eat &&
+            (sp->trophic_level == TROPHIC_L4A || sp->trophic_level == TROPHIC_L4B) &&
+            (prey_sp->trophic_level == TROPHIC_L4A || prey_sp->trophic_level == TROPHIC_L4B) &&
+            prey_sp->id != sp->id)  // 非同种
+        {
+            uint8_t size_threshold = (uint8_t)(c->size * 6 / 10); // ≤ 60%
+            if (prey->size <= size_threshold) can_eat = true;
         }
 
         if (!can_eat) continue;
@@ -161,23 +330,27 @@ static void forage_predator(struct game_context *ctx, struct creature *c, const 
     if (best_idx >= 0) {
         struct creature *prey = &ctx->save.creatures[best_idx];
 
-        // 朝猎物移动
-        if (prey->pos_x > c->pos_x) { c->vel_x = 2; c->facing_right = true; }
-        else if (prey->pos_x < c->pos_x) { c->vel_x = -2; c->facing_right = false; }
-        if (prey->pos_y > c->pos_y) c->vel_y = 1;
-        else if (prey->pos_y < c->pos_y) c->vel_y = -1;
+        // 朝猎物移动（L4 速度更快）
+        int8_t speed = (sp->trophic_level >= TROPHIC_L4A) ? 3 : 2;
+        if (prey->pos_x > c->pos_x) { c->vel_x = speed; c->facing_right = true; }
+        else if (prey->pos_x < c->pos_x) { c->vel_x = -speed; c->facing_right = false; }
+        if (prey->pos_y > c->pos_y) c->vel_y = (int8_t)(speed / 2 + 1);
+        else if (prey->pos_y < c->pos_y) c->vel_y = (int8_t)(-(speed / 2 + 1));
 
-        // 接触判定：距离 < 8
+        // 接触判定：距离 < 8 执行捕食
         if (best_dist < 8) {
-            // 进食成功
-            if (c->hunger >= 15) c->hunger -= 15;
+            // 捕食收益：按猎物体型计算
+            uint8_t relief = (prey->size / 3) + 5;
+            if (relief > 30) relief = 30;
+            if (c->hunger >= relief) c->hunger -= relief;
             else c->hunger = 0;
             c->growth_pts += 3;
 
-            // 猎物被吃掉：释放营养
+            // 猎物被吃 → 释放营养到环境
             const struct species_def *prey_sp = species_get_by_id(prey->species_id);
             if (prey_sp) {
-                ctx->save.env.nutrients += prey_sp->food_value / 5;
+                uint8_t nut_release = prey_sp->size_base / 4;
+                ctx->save.env.nutrients += nut_release;
                 if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
             }
 
@@ -186,15 +359,22 @@ static void forage_predator(struct game_context *ctx, struct creature *c, const 
                 ctx->save.creatures[best_idx] = ctx->save.creatures[ctx->save.creature_count - 1];
             }
             ctx->save.creature_count--;
-            ESP_LOGI(TAG, "Predation: %s ate prey, hunger=%d", sp->name, c->hunger);
-
-            // §4.6: 吃饱后 30s 内不再捕食（通过 hunger < 40 的检查自然实现）
+            ESP_LOGI(TAG, "Predation: %s caught prey, hunger=%d", sp->name, c->hunger);
+        }
+    } else {
+        // 无猎物 → nutrient 备选（效率极低，每60秒-1饥饿 -2营养）
+        if (c->hunger > 60 && ctx->save.env.nutrients > 15) {
+            if (ctx->save.env.total_seconds % 60 == 0) {
+                if (c->hunger > 0) c->hunger--;
+                if (ctx->save.env.nutrients >= 2) ctx->save.env.nutrients -= 2;
+                else ctx->save.env.nutrients = 0;
+            }
         }
     }
 }
 
 // ============================================================
-// §4.2 生物行为更新（心跳每秒）
+// §4.2 生物行为更新 (每秒调用一次)
 // ============================================================
 static void update_creatures(struct game_context *ctx)
 {
@@ -203,23 +383,30 @@ static void update_creatures(struct game_context *ctx)
         const struct species_def *sp = species_get_by_id(c->species_id);
         if (!sp) continue;
 
-        // 年龄增长
+        // 年龄 +1秒
         c->age_seconds++;
 
-        // §4.5 饥饿增长：每分钟 +0.5 => 每 120s +1
-        // L1 不饥饿
-        if (sp->trophic_level != TROPHIC_L1) {
-            if ((ctx->frame_count % 10) == (uint32_t)(i * 7 % 10)) {
+        // ─── 饥饿增长 ───
+        // hunger_rate = 次/分钟 → 每 (60/hunger_rate) 秒 hunger+1
+        // L1 植物不饥饿
+        if (sp->trophic_level != TROPHIC_L1 && sp->hunger_rate > 0) {
+            uint16_t interval = 60 / sp->hunger_rate;
+            if (interval < 1) interval = 1;
+            if ((c->age_seconds % interval) == 0) {
                 if (c->hunger < 100) c->hunger++;
             }
-            // ESP_LOGI(TAG, "species_id:%d, hunger:%d", c->species_id, c->hunger);
         }
 
-        // 觅食AI
-        if (c->state == 0) {
+        // ─── 逃跑AI（每2秒检测一次） ───
+        if (c->state == 0 && (c->age_seconds % 2 == 0)) {
+            prey_flee(ctx, c, sp);
+        }
+
+        // ─── 觅食AI（每3秒执行一次，避免过于频繁） ───
+        if (c->state == 0 && (c->age_seconds % 3 == 0)) {
             switch (sp->trophic_level) {
                 case TROPHIC_L2:
-                    forage_l2(ctx, c);
+                    forage_l2(ctx, c, sp);
                     break;
                 case TROPHIC_L3:
                 case TROPHIC_L4A:
@@ -227,63 +414,68 @@ static void update_creatures(struct game_context *ctx)
                     forage_predator(ctx, c, sp);
                     break;
                 default:
-                    break;
+                    break; // L1 不觅食
             }
         }
 
-        // 随机游动（没有在追猎时）
+        // ─── 随机游动（非追猎状态且静止时） ───
         if (c->state == 0 && c->vel_x == 0 && c->vel_y == 0) {
-            // §4.6: 若无猎物 → 在缸内悠游（贝塞尔曲线随机路径简化为随机方向）
-            if ((ctx->frame_count + i * 7) % 30 == 0) {
+            if ((c->age_seconds + i * 7) % 5 == 0) {
                 c->vel_x = (int8_t)((esp_random() % 5) - 2);
-                c->vel_y = (int8_t)((esp_random() % 5) - 2);
+                c->vel_y = (int8_t)((esp_random() % 3) - 1);
                 c->facing_right = (c->vel_x >= 0);
             }
         }
 
-        // 应用速度
-        c->pos_x += c->vel_x;
-        c->pos_y += c->vel_y;
+        // ─── 应用速度 (L1 植物不移动) ───
+        if (sp->trophic_level != TROPHIC_L1) {
+            c->pos_x += c->vel_x;
+            c->pos_y += c->vel_y;
 
-        // 速度衰减（模拟水阻力）
-        if ((ctx->frame_count + i) % 10 == 0) {
-            if (c->vel_x > 0) c->vel_x--;
-            else if (c->vel_x < 0) c->vel_x++;
-            if (c->vel_y > 0) c->vel_y--;
-            else if (c->vel_y < 0) c->vel_y++;
+            // 水阻力衰减（每2秒）
+            if (c->age_seconds % 2 == 0) {
+                if (c->vel_x > 0) c->vel_x--;
+                else if (c->vel_x < 0) c->vel_x++;
+                if (c->vel_y > 0) c->vel_y--;
+                else if (c->vel_y < 0) c->vel_y++;
+            }
+
+            // 边界限制
+            if (c->pos_x < 0) { c->pos_x = 0; c->vel_x = 1; }
+            if (c->pos_x > 120) { c->pos_x = 120; c->vel_x = -1; }
+            if (c->pos_y < 0) { c->pos_y = 0; c->vel_y = 1; }
+            if (c->pos_y > 120) { c->pos_y = 120; c->vel_y = -1; }
         }
 
-        // 边界限制
-        if (c->pos_x < 0) { c->pos_x = 0; c->vel_x = 1; }
-        if (c->pos_x > 120) { c->pos_x = 120; c->vel_x = -1; }
-        if (c->pos_y < 0) { c->pos_y = 0; c->vel_y = 1; }
-        if (c->pos_y > 120) { c->pos_y = 120; c->vel_y = -1; }
-
-        // §4.8 成长：连续30分钟饱食(hunger<30) → growth_pts +1
-        if (c->hunger < 30 && c->stage < STAGE_GIANT) {
-            // 每 30s 检查一次（简化连续30min为累积growth_pts）
+        // ─── §4.8 成长：饱食(hunger<30)时累积 growth_pts ───
+        if (sp->trophic_level != TROPHIC_L1 && c->hunger < 30 && c->stage < STAGE_GIANT) {
+            // 每30秒自然增长1点
             if (c->age_seconds % 30 == 0) {
                 c->growth_pts++;
             }
+            // 达到50点 → 体型+5，检查阶段升级
             if (c->growth_pts >= 50) {
                 c->growth_pts = 0;
-                if (c->size + 5 <= sp->size_max) {
+                if (c->size + 5 <= sp->size_cap) {
                     c->size += 5;
+                } else {
+                    c->size = sp->size_cap;
                 }
-                // 阶段升级
+                // 阶段升级判定
                 if (c->stage == STAGE_JUVENILE && c->size >= sp->size_base * 2) {
                     c->stage = STAGE_SUBADULT;
                 } else if (c->stage == STAGE_SUBADULT && c->size >= sp->size_base * 3) {
                     c->stage = STAGE_ADULT;
-                } else if (c->stage == STAGE_ADULT && c->size >= sp->size_max * 9 / 10) {
+                } else if (c->stage == STAGE_ADULT && c->size >= sp->size_cap * 9 / 10) {
                     c->stage = STAGE_GIANT;
                 }
-                ESP_LOGI(TAG, "Creature %d grew: size=%d stage=%d", i, c->size, c->stage);
+                ESP_LOGI(TAG, "Growth: creature %d size=%d stage=%d", i, c->size, c->stage);
             }
         }
 
-        // §4.10 柔性死亡：hunger > 95 持续 30 分钟 → 睡眠态 → 24h 后消失
-        if (c->hunger > 95) {
+        // ─── §4.10 柔性死亡 ───
+        // L1 通过被啃光 size 来移除，不走饥饿死亡
+        if (sp->trophic_level != TROPHIC_L1 && c->hunger > 95) {
             if (c->state == 0) {
                 c->state = 1; // 进入睡眠态
                 c->sleep_timer = 30 * 60; // 30分钟观察期
@@ -292,34 +484,37 @@ static void update_creatures(struct game_context *ctx)
                 if (c->sleep_timer > 0) {
                     c->sleep_timer--;
                 } else {
-                    // 进入死亡倒计时 (24h = 86400s，简化为 1h = 3600s 加速体验)
                     c->state = 2;
-                    c->sleep_timer = 3600;
+                    c->sleep_timer = 3600; // 1h 死亡倒计时
                 }
             } else if (c->state == 2) {
                 if (c->sleep_timer > 0) {
                     c->sleep_timer--;
                 } else {
-                    // §4.10: 温柔消失 → 营养 +20
+                    // 温柔消失 → 营养回馈环境
                     ctx->save.env.nutrients += 20;
                     if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
-                    // 移除
                     if (i < ctx->save.creature_count - 1) {
                         ctx->save.creatures[i] = ctx->save.creatures[ctx->save.creature_count - 1];
                     }
                     ctx->save.creature_count--;
-                    i--;
+                    i--; // 当前槽被替换，重新处理
                     ESP_LOGW(TAG, "Creature died peacefully, nutrients +20");
                 }
             }
-        } else if (c->state == 1 && c->hunger < 80) {
-            // 恢复（玩家喂食后唤醒）
+        } else if ((c->state == 1 || c->state == 2) && c->hunger < 80) {
+            // 喂饱后苏醒
             c->state = 0;
             c->sleep_timer = 0;
-        } else if (c->state == 2 && c->hunger < 80) {
-            // 死亡倒计时中也可以被救回
-            c->state = 0;
-            c->sleep_timer = 0;
+        }
+
+        // ─── 低氧应激 ───
+        if (sp->trophic_level != TROPHIC_L1 && ctx->save.env.oxygen < 20) {
+            // 低氧时心情下降，加速饥饿
+            if (c->age_seconds % 10 == 0) {
+                if (c->mood > 0) c->mood--;
+                if (c->hunger < 100) c->hunger++;
+            }
         }
     }
 
@@ -327,81 +522,75 @@ static void update_creatures(struct game_context *ctx)
 }
 
 // ============================================================
-// §4.11 稳态修复
+// §4.11 稳态修复 (每30秒)
 // ============================================================
 static void update_homeostasis(struct game_context *ctx)
 {
-    // 每 30 秒检查一次稳态
     if (ctx->save.env.total_seconds % 30 != 0) return;
 
     struct environment *env = &ctx->save.env;
 
-    // §4.11 藻类爆发：algae > 80 → L2 啃食加速（在 forage_l2 中自然发生）
-    // 这里只做额外衰减
+    // ─── 藻类爆发控制 ───
+    // algae_mass > 80 且无 L2 时，最大 L1 自然老化
     if (env->algae_mass > 80) {
-        // 统计 L2 数量，加速消耗
         uint8_t l2_count = 0;
         for (int i = 0; i < ctx->save.creature_count; i++) {
             const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
             if (sp && sp->trophic_level == TROPHIC_L2) l2_count++;
         }
-        // 每只 L2 额外消耗 1 点藻类
-        uint8_t consume = l2_count;
-        if (consume > env->algae_mass - 50) consume = env->algae_mass - 50;
-        env->algae_mass -= consume;
+        if (l2_count == 0) {
+            int biggest = -1;
+            uint8_t max_sz = 0;
+            for (int i = 0; i < ctx->save.creature_count; i++) {
+                const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
+                if (sp && sp->trophic_level == TROPHIC_L1 && ctx->save.creatures[i].size > max_sz) {
+                    max_sz = ctx->save.creatures[i].size;
+                    biggest = i;
+                }
+            }
+            if (biggest >= 0 && ctx->save.creatures[biggest].size > 1) {
+                ctx->save.creatures[biggest].size -= 2;
+                if (ctx->save.creatures[biggest].size < 1) ctx->save.creatures[biggest].size = 1;
+            }
+        }
     }
 
-    // §4.11 鱼太少：离线时小概率"野生访客"漂入
-    // 简化：在线时如果生物数 < 3 且有空位，每 5 分钟 20% 概率漂入
+    // ─── 缸内生物过少 → 野生访客 ───
     if (ctx->save.creature_count < 3 && ctx->save.creature_count < MAX_CREATURES) {
         if (ctx->save.env.total_seconds % 300 == 0) {
             if ((esp_random() % 100) < 20) {
-                // 随机选一个 L2 或 L3 的 common 物种
                 uint8_t target_level = ((esp_random() % 2) == 0) ? TROPHIC_L2 : TROPHIC_L3;
                 const struct species_def *sp = species_get_random(target_level, RARITY_COMMON);
                 if (sp) {
-                    uint16_t cid = engine_alloc_creature_id(&ctx->save);
-                    if (cid == 0) {
-                        ESP_LOGW(TAG, "Wild visitor: creature ID exhausted, skip");
-                    } else {
-                        struct creature *c = &ctx->save.creatures[ctx->save.creature_count];
-                        memset(c, 0, sizeof(*c));
-                        c->creature_id = cid;
-                        c->species_id = sp->id;
-                        c->stage = STAGE_JUVENILE;
-                        c->size = sp->size_base;
-                        c->pos_x = (int8_t)(esp_random() % 120);
-                        c->pos_y = (int8_t)(esp_random() % 120);
-                        c->hunger = 30;
-                        c->mood = 70;
-                        c->state = 0;
-                        ctx->save.creature_count++;
-                        ESP_LOGI(TAG, "Wild visitor: %s drifted in!", sp->name);
-                        ctx->dirty = true;
-                    }
+                    struct creature *nc = &ctx->save.creatures[ctx->save.creature_count];
+                    memset(nc, 0, sizeof(*nc));
+                    nc->species_id = sp->id;
+                    nc->stage = STAGE_JUVENILE;
+                    nc->size = sp->size_base;
+                    nc->pos_x = (int8_t)(esp_random() % 120);
+                    nc->pos_y = (int8_t)(esp_random() % 120);
+                    nc->hunger = 30;
+                    nc->mood = sp->mood_base;
+                    nc->state = 0;
+                    ctx->save.creature_count++;
+                    ESP_LOGI(TAG, "Wild visitor: %s drifted in!", sp->name);
+                    ctx->dirty = true;
                 }
             }
         }
     }
 
-    // §4.11 鱼太多：觅食半径自动放大 + 生育自然停止
-    // （生育停止在 engine_try_breed 中通过 creature_count >= MAX_CREATURES 实现）
-
-    // §4.11 营养枯竭：自动开缸内灯
-    if (env->nutrients < 10 && env->sunlight < 50) {
-        env->sunlight += 5;
-        if (env->sunlight > 100) env->sunlight = 100;
-    }
-
-    // §4.11 阳光不足 → 自动开缸内灯（消耗微量光合币）
-    if (env->sunlight < 20 && !env->is_daytime) {
-        env->sunlight += 2;
-        if (env->sunlight > 100) env->sunlight = 100;
-        // 消耗 1 光合币
-        if (ctx->save.photosynth_coins > 0) {
-            ctx->save.photosynth_coins--;
+    // ─── 营养自然补充 ───
+    // 有死亡有机物(隐含)：每5分钟 nutrients +2
+    if (ctx->save.env.total_seconds % 300 == 0) {
+        if (env->nutrients < 100) {
+            env->nutrients += 2;
+            if (env->nutrients > 100) env->nutrients = 100;
         }
     }
+
+    // 夜间阳光自然降低是正常生态节奏，低光植物(PREF_LOW)适应夜间环境
+    // 不做自动补光干预
 }
 
 // ============================================================
@@ -411,7 +600,7 @@ static void apply_shake_effect(struct game_context *ctx)
 {
     static uint32_t s_imu_check_timer = 0;
     s_imu_check_timer += ENGINE_TICK_MS;
-    if (s_imu_check_timer < 100) return;
+    if (s_imu_check_timer < 100) return; // 每100ms检测一次
     s_imu_check_timer = 0;
 
     shake_level_t shake = hal_imu_detect_shake();
@@ -420,20 +609,21 @@ static void apply_shake_effect(struct game_context *ctx)
     enum shake_effect effect = hal_imu_get_shake_effect(shake);
     switch (effect) {
         case SHAKE_EFFECT_FEED:
-            // 全体喂食：hunger -10
+            // 全体喂食：hunger -10，唤醒睡眠态
             for (int i = 0; i < ctx->save.creature_count; i++) {
+                const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
+                if (sp && sp->trophic_level == TROPHIC_L1) continue; // 植物跳过
                 if (ctx->save.creatures[i].hunger >= 10) {
                     ctx->save.creatures[i].hunger -= 10;
                 } else {
                     ctx->save.creatures[i].hunger = 0;
                 }
-                // 唤醒睡眠中的生物
                 if (ctx->save.creatures[i].state == 1 || ctx->save.creatures[i].state == 2) {
                     ctx->save.creatures[i].state = 0;
                     ctx->save.creatures[i].sleep_timer = 0;
                 }
             }
-            ESP_LOGI(TAG, "Shake effect: FEED (-10 hunger, wake all)");
+            ESP_LOGI(TAG, "Shake FEED: all creatures -10 hunger, wake sleepers");
             break;
 
         case SHAKE_EFFECT_OXYGEN:
@@ -441,24 +631,28 @@ static void apply_shake_effect(struct game_context *ctx)
                 uint16_t o2 = ctx->save.env.oxygen + 20;
                 if (o2 > 100) o2 = 100;
                 ctx->save.env.oxygen = (uint8_t)o2;
-                ESP_LOGI(TAG, "Shake effect: OXYGEN (+20)");
+                ESP_LOGI(TAG, "Shake OXYGEN: +20");
             }
             break;
 
         case SHAKE_EFFECT_SCATTER:
-            // L1 生物 20% 死亡
+            // L1 植物受冲击：20%概率缩小或移除
             for (int i = ctx->save.creature_count - 1; i >= 0; i--) {
                 const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
-                if (sp && sp->trophic_level == TROPHIC_L1) {
-                    if ((esp_random() % 100) < 20) {
-                        ctx->save.env.nutrients += sp->food_value;
+                if (!sp || sp->trophic_level != TROPHIC_L1) continue;
+                if ((esp_random() % 100) < 20) {
+                    if (ctx->save.creatures[i].size > 1) {
+                        ctx->save.creatures[i].size--;
+                        ctx->save.env.nutrients += sp->size_base / 3;
                         if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
+                    } else {
+                        // size=1 被冲走
                         if (i < ctx->save.creature_count - 1) {
                             ctx->save.creatures[i] = ctx->save.creatures[ctx->save.creature_count - 1];
                         }
                         ctx->save.creature_count--;
-                        ESP_LOGW(TAG, "Shake scatter: L1 creature died");
                     }
+                    ESP_LOGW(TAG, "Shake SCATTER: L1 plant damaged");
                 }
             }
             break;
@@ -476,7 +670,6 @@ static void apply_tilt_effect(struct game_context *ctx)
     hal_imu_get_tilt(&pitch, &roll);
 
     if (hal_imu_detect_water_cycle(pitch, roll)) {
-        // §4.11: 水循环 → 营养 +10
         ctx->save.env.nutrients += 10;
         if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
         ESP_LOGI(TAG, "Water cycle: nutrients +10");
@@ -485,20 +678,22 @@ static void apply_tilt_effect(struct game_context *ctx)
 }
 
 // ============================================================
-// 主入口：每秒一帧心跳（§4.2）
+// 主入口：每帧调用（16ms），内部节流到每秒执行逻辑
 // ============================================================
 void engine_logic_update(struct game_context *ctx)
 {
     if (!ctx) return;
 
-    // §4.2 按顺序执行：
-    // 1. 环境更新（阳光、营养、氧气）
-    update_environment(ctx);
-    // 2-6. 生物行为（觅食、成长、衰减/睡眠、死亡）
-    update_creatures(ctx);
-    // 7. 稳态修复
-    update_homeostasis(ctx);
-    // 8. 玩家物理交互
+    // IMU 效果每帧都检测（100ms 内部节流）
     apply_shake_effect(ctx);
     apply_tilt_effect(ctx);
+
+    // 生态逻辑每秒执行一次
+    s_logic_tick++;
+    if (s_logic_tick < LOGIC_INTERVAL) return;
+    s_logic_tick = 0;
+
+    update_environment(ctx);
+    update_creatures(ctx);
+    update_homeostasis(ctx);
 }

@@ -458,7 +458,7 @@ static void creature_long_press_cb(lv_event_t *e)
              "Age: %lu sec",
              sp->name,
              stage_name[c->stage],
-             c->size, sp->size_max,
+             c->size, sp->size_cap,
              c->hunger,
              c->mood,
              (unsigned long)c->age_seconds);

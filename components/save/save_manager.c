@@ -143,7 +143,7 @@ void save_gamesave_init_default(struct game_save *save)
     // 默认生物：螺旋藻 + 黑壳虾 + 灯科鱼
     save->creature_count = 3;
     save->creatures[0].creature_id = 1;
-    save->creatures[0].species_id = 1;  // 螺旋藻
+    save->creatures[0].species_id = 1;  // Spirulina 螺旋藻
     save->creatures[0].stage = STAGE_ADULT;
     save->creatures[0].size = 15;
     save->creatures[0].pos_x = 100;
