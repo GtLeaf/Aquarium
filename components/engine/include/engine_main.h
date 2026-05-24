@@ -17,6 +17,7 @@ enum game_state {
     STATE_TANK_VIEW,
     STATE_EVENT_POPUP,
     STATE_AMBIENT_MODE,
+    STATE_SETTINGS,
 };
 
 // 全局游戏上下文

@@ -165,7 +165,7 @@ esp_err_t engine_init(void)
     // 记录新的离线开始时间
     s_ctx.save.offline_start = (uint32_t)now;
 
-    s_ctx.state = STATE_TANK_VIEW;
+    s_ctx.state = STATE_TITLE;
     s_ctx.frame_count = 0;
     s_ctx.state_timer_ms = 0;
 
@@ -467,6 +467,11 @@ void engine_tick(void)
     s_tick_ms += dt_ms;
     s_ctx.frame_count++;
     s_ctx.state_timer_ms += dt_ms;
+
+    // 标题界面和设置界面不运行生态系统
+    if (s_ctx.state == STATE_TITLE || s_ctx.state == STATE_BOOT || s_ctx.state == STATE_SETTINGS) {
+        return;
+    }
 
     // IMU 效果每帧检测（内部有100ms节流）
     apply_shake_effect(&s_ctx);

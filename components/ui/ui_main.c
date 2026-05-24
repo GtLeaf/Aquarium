@@ -147,6 +147,7 @@ void ui_show_offline_popup(uint32_t coins, uint32_t hours, uint8_t creatures)
 // 导航到设置界面
 void ui_navigate_settings(void)
 {
+    engine_set_state(STATE_SETTINGS);
     ui_screen_settings_show();
 }
 
@@ -174,6 +175,9 @@ void ui_navigate_home(void)
     ui_screen_shop_hide();
     ui_screen_settings_hide();
     ui_screen_collection_hide();
+
+    // 恢复生态运转
+    engine_set_state(STATE_TANK_VIEW);
 
     // 清理子页面的重对象，释放内存并减少下次渲染负担
     extern lv_obj_t *g_shop_grid;

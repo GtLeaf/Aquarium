@@ -94,13 +94,16 @@ static void update_environment(struct game_context *ctx)
         int16_t o2 = env->oxygen;
         // 产氧：algae_mass / 10（每10秒）
         o2 += (env->algae_mass / 10);
-        // 耗氧：非L1生物 oxygen_demand / 5（每10秒）
+        // 耗氧：非L1生物 oxygen_demand 累加后 / 5（每10秒）
+        // 先累加总 demand，再统一除，避免逐个整数除法截断小值
+        uint16_t total_demand = 0;
         for (int i = 0; i < ctx->save.creature_count; i++) {
             const struct species_def *sp = species_get_by_id(ctx->save.creatures[i].species_id);
             if (sp && sp->trophic_level != TROPHIC_L1) {
-                o2 -= (sp->oxygen_demand / 5);
+                total_demand += sp->oxygen_demand;
             }
         }
+        o2 -= (int16_t)(total_demand / 5);
         if (o2 > 100) o2 = 100;
         if (o2 < 0) o2 = 0;
         env->oxygen = (uint8_t)o2;
@@ -684,8 +687,9 @@ void apply_tilt_effect(struct game_context *ctx)
 
     if (hal_imu_detect_water_cycle(pitch, roll)) {
         uint32_t now_sec = ctx->save.env.total_seconds;
-        // 节流：距上次水循环至少 60 秒
-        if (now_sec - s_last_water_cycle_sec < 60) return;
+        // 节流：距上次水循环至少 60 秒 
+        // todo--cenmingdi, 测试数据记得还原
+        if (now_sec - s_last_water_cycle_sec < 10) return;
         s_last_water_cycle_sec = now_sec;
 
         ctx->save.env.nutrients += 10;
