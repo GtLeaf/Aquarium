@@ -1,6 +1,7 @@
 #include "hal_pmu.h"
 #include "hal_i2c.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
@@ -20,6 +21,14 @@ static const char *TAG = "hal_pmu";
 #define AXP2101_REG_CHG_CFG0      0x61
 #define AXP2101_REG_CHG_CFG1      0x62
 #define AXP2101_REG_CHG_VOLT      0x64
+#define AXP2101_REG_BAT_PERCENT   0xA4
+#define AXP2101_REG_STATUS1       0x01
+
+// 电量缓存（30秒刷新一次，避免频繁 I2C）
+static uint8_t s_bat_cache = 0;
+static bool    s_charging_cache = false;
+static int64_t s_last_read_us = 0;
+#define BAT_READ_INTERVAL_US  (30 * 1000000LL)
 
 static esp_err_t axp2101_write_byte(uint8_t reg, uint8_t data)
 {
@@ -93,4 +102,39 @@ esp_err_t hal_pmu_init(void)
 
     ESP_LOGI(TAG, "PMU initialized (ALDO1+ALDO2+ALDO4 enabled @ 3.3V)");
     return ESP_OK;
+}
+
+uint8_t hal_pmu_get_battery_percent(void)
+{
+    int64_t now = esp_timer_get_time();
+    if (now - s_last_read_us > BAT_READ_INTERVAL_US || s_last_read_us == 0) {
+        uint8_t raw = 0;
+        esp_err_t ret = axp2101_read_byte(AXP2101_REG_BAT_PERCENT, &raw);
+        if (ret == ESP_OK) {
+            // AXP2101 0xA4 直接返回 0-100 百分比
+            s_bat_cache = (raw > 100) ? 100 : raw;
+        } else {
+            ESP_LOGW(TAG, "Failed to read battery percent");
+        }
+
+        // 顺便读充电状态
+        uint8_t status = 0;
+        ret = axp2101_read_byte(AXP2101_REG_STATUS1, &status);
+        if (ret == ESP_OK) {
+            s_charging_cache = (status & 0x20) != 0; // bit5 = charging active
+        }
+
+        s_last_read_us = now;
+    }
+    return s_bat_cache;
+}
+
+bool hal_pmu_is_charging(void)
+{
+    // 确保缓存已刷新
+    int64_t now = esp_timer_get_time();
+    if (now - s_last_read_us > BAT_READ_INTERVAL_US || s_last_read_us == 0) {
+        hal_pmu_get_battery_percent(); // 触发缓存刷新
+    }
+    return s_charging_cache;
 }

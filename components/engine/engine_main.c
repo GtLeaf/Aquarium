@@ -468,6 +468,13 @@ void engine_tick(void)
     s_ctx.frame_count++;
     s_ctx.state_timer_ms += dt_ms;
 
+    // IMU 效果每帧检测（内部有100ms节流）
+    apply_shake_effect(&s_ctx);
+    apply_tilt_effect(&s_ctx);
+
+    // 物理位置更新：每帧执行（平滑运动）
+    engine_physics_update(&s_ctx);
+
     // 生态逻辑每 1 秒执行一次（1000ms / ENGINE_TICK_MS ≈ 62 帧）
     static uint32_t ecology_timer = 0;
     ecology_timer += dt_ms;

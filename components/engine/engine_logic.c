@@ -8,10 +8,6 @@
 
 static const char *TAG = "engine_logic";
 
-// 逻辑帧计数器：60帧(ENGINE_TICK_MS=16)才执行一次1秒逻辑
-static uint32_t s_logic_tick = 0;
-#define LOGIC_INTERVAL  (1000 / ENGINE_TICK_MS)  // ≈62帧 = 1秒
-
 // ============================================================
 // §4.3 环境层更新 (每秒调用一次)
 // ============================================================
@@ -181,6 +177,10 @@ static void forage_l2(struct game_context *ctx, struct creature *c, const struct
             else c->hunger = 0;
             c->growth_pts++;
 
+            // L2 排泄回馈营养（模拟消化→排泄→分解）
+            ctx->save.env.nutrients += 1;
+            if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
+
             // 植物缩小
             if (plant->size > 1) {
                 plant->size--;
@@ -256,17 +256,26 @@ static void prey_flee(struct game_context *ctx, struct creature *prey, const str
 
     struct creature *hunter = &ctx->save.creatures[threat_idx];
 
-    // 反方向逃跑（速度=2，比 L3 追猎慢但比普通游动快）
+    // 打断停歇和减速状态（被追时立即跑）
+    prey->rest_frames = 0;
+    prey->decel_frames = 0;
+
+    // 反方向逃跑（|vel|>1 标记为加速状态，触发 physics 的逃跑帧间隔）
+    // L2 flee vel=2 → physics 每2帧移1px = 12px/s
+    // L3 flee vel=2 → physics 每帧移1px = 30px/s
     int8_t flee_speed = 2;
     if (hunter->pos_x > prey->pos_x) { prey->vel_x = -flee_speed; prey->facing_right = false; }
     else if (hunter->pos_x < prey->pos_x) { prey->vel_x = flee_speed; prey->facing_right = true; }
+    else { prey->vel_x = (esp_random() % 2) ? flee_speed : -flee_speed; prey->facing_right = (prey->vel_x > 0); }
     if (hunter->pos_y > prey->pos_y) prey->vel_y = -flee_speed;
     else if (hunter->pos_y < prey->pos_y) prey->vel_y = flee_speed;
+    else prey->vel_y = (int8_t)((esp_random() % 3) - 1); // 同y轴随机上下
 
-    // 逃跑时随机偏移（避免直线逃跑被预判）
+    // 逃跑时随机偏移（避免直线逃跑被预判），但保证|vel|>=2
     if ((esp_random() % 100) < 30) {
-        prey->vel_x += (int8_t)((esp_random() % 3) - 1);
-        prey->vel_y += (int8_t)((esp_random() % 3) - 1);
+        int8_t offset_y = (int8_t)((esp_random() % 3) - 1);
+        prey->vel_y += offset_y;
+        // 不偏移 vel_x，保证|vel_x|>=2 使物理层识别为加速状态
     }
 }
 
@@ -330,8 +339,9 @@ static void forage_predator(struct game_context *ctx, struct creature *c, const 
     if (best_idx >= 0) {
         struct creature *prey = &ctx->save.creatures[best_idx];
 
-        // 朝猎物移动（L4 速度更快）
-        int8_t speed = (sp->trophic_level >= TROPHIC_L4A) ? 3 : 2;
+        // 朝猎物移动（|vel|>1 标记为追猎加速状态）
+        // L3/L4 追猎：vel=2，physics 每帧移1px = 30px/s
+        int8_t speed = 2;
         if (prey->pos_x > c->pos_x) { c->vel_x = speed; c->facing_right = true; }
         else if (prey->pos_x < c->pos_x) { c->vel_x = -speed; c->facing_right = false; }
         if (prey->pos_y > c->pos_y) c->vel_y = (int8_t)(speed / 2 + 1);
@@ -345,6 +355,12 @@ static void forage_predator(struct game_context *ctx, struct creature *c, const 
             if (c->hunger >= relief) c->hunger -= relief;
             else c->hunger = 0;
             c->growth_pts += 3;
+
+            // 捕食者排泄回馈营养（模拟消化→排泄→被微生物分解）
+            // 回馈量 = 猎物体型 / 5，比猎物死亡释放少（部分被吸收）
+            uint8_t excrete = (prey->size / 5) + 1;
+            ctx->save.env.nutrients += excrete;
+            if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
 
             // 猎物被吃 → 释放营养到环境
             const struct species_def *prey_sp = species_get_by_id(prey->species_id);
@@ -418,34 +434,29 @@ static void update_creatures(struct game_context *ctx)
             }
         }
 
-        // ─── 随机游动（非追猎状态且静止时） ───
-        if (c->state == 0 && c->vel_x == 0 && c->vel_y == 0) {
-            if ((c->age_seconds + i * 7) % 5 == 0) {
-                c->vel_x = (int8_t)((esp_random() % 5) - 2);
-                c->vel_y = (int8_t)((esp_random() % 3) - 1);
-                c->facing_right = (c->vel_x >= 0);
+        // ─── 随机游动（非追猎状态，停歇结束后重新出发） ───
+        // vel==0 且 rest_frames==0 表示停歇刚结束，重新给予方向
+        if (c->state == 0 && c->vel_x == 0 && c->vel_y == 0 && c->rest_frames == 0 && c->decel_frames == 0) {
+            c->vel_x = (esp_random() % 2) ? 1 : -1;
+            c->vel_y = (int8_t)((esp_random() % 3) - 1); // -1, 0, +1
+            c->facing_right = (c->vel_x > 0);
+        }
+        // 周期性微调方向（模拟自然游动曲线）
+        // L2: 每4秒, L3: 每3秒, L4: 每5秒
+        {
+            uint16_t wander_interval = (sp->trophic_level == TROPHIC_L2) ? 4 :
+                                       (sp->trophic_level >= TROPHIC_L4A) ? 5 : 3;
+            if (c->state == 0 && (c->age_seconds % wander_interval == 0) && c->age_seconds > 0) {
+                // 40% 概率换方向
+                if ((esp_random() % 100) < 40) {
+                    c->vel_x = (esp_random() % 2) ? 1 : -1;
+                    c->vel_y = (int8_t)((esp_random() % 3) - 1);
+                    c->facing_right = (c->vel_x > 0);
+                }
             }
         }
 
-        // ─── 应用速度 (L1 植物不移动) ───
-        if (sp->trophic_level != TROPHIC_L1) {
-            c->pos_x += c->vel_x;
-            c->pos_y += c->vel_y;
-
-            // 水阻力衰减（每2秒）
-            if (c->age_seconds % 2 == 0) {
-                if (c->vel_x > 0) c->vel_x--;
-                else if (c->vel_x < 0) c->vel_x++;
-                if (c->vel_y > 0) c->vel_y--;
-                else if (c->vel_y < 0) c->vel_y++;
-            }
-
-            // 边界限制
-            if (c->pos_x < 0) { c->pos_x = 0; c->vel_x = 1; }
-            if (c->pos_x > 120) { c->pos_x = 120; c->vel_x = -1; }
-            if (c->pos_y < 0) { c->pos_y = 0; c->vel_y = 1; }
-            if (c->pos_y > 120) { c->pos_y = 120; c->vel_y = -1; }
-        }
+        // 位置更新由 engine_physics_update() 每帧处理，此处不重复
 
         // ─── §4.8 成长：饱食(hunger<30)时累积 growth_pts ───
         if (sp->trophic_level != TROPHIC_L1 && c->hunger < 30 && c->stage < STAGE_GIANT) {
@@ -596,7 +607,7 @@ static void update_homeostasis(struct game_context *ctx)
 // ============================================================
 // 摇晃效果处理
 // ============================================================
-static void apply_shake_effect(struct game_context *ctx)
+void apply_shake_effect(struct game_context *ctx)
 {
     static uint32_t s_imu_check_timer = 0;
     s_imu_check_timer += ENGINE_TICK_MS;
@@ -663,13 +674,20 @@ static void apply_shake_effect(struct game_context *ctx)
     ctx->dirty = true;
 }
 
-// 倾斜效果：90度翻转触发水循环
-static void apply_tilt_effect(struct game_context *ctx)
+// 倾斜效果：90度翻转触发水循环（节流：最少间隔60~120秒）
+static uint32_t s_last_water_cycle_sec = 0;
+
+void apply_tilt_effect(struct game_context *ctx)
 {
     float pitch, roll;
     hal_imu_get_tilt(&pitch, &roll);
 
     if (hal_imu_detect_water_cycle(pitch, roll)) {
+        uint32_t now_sec = ctx->save.env.total_seconds;
+        // 节流：距上次水循环至少 60 秒
+        if (now_sec - s_last_water_cycle_sec < 60) return;
+        s_last_water_cycle_sec = now_sec;
+
         ctx->save.env.nutrients += 10;
         if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
         ESP_LOGI(TAG, "Water cycle: nutrients +10");
@@ -678,22 +696,176 @@ static void apply_tilt_effect(struct game_context *ctx)
 }
 
 // ============================================================
-// 主入口：每帧调用（16ms），内部节流到每秒执行逻辑
+// 主入口：由 engine_tick() 每秒调用一次
 // ============================================================
 void engine_logic_update(struct game_context *ctx)
 {
     if (!ctx) return;
 
-    // IMU 效果每帧都检测（100ms 内部节流）
-    apply_shake_effect(ctx);
-    apply_tilt_effect(ctx);
-
-    // 生态逻辑每秒执行一次
-    s_logic_tick++;
-    if (s_logic_tick < LOGIC_INTERVAL) return;
-    s_logic_tick = 0;
-
     update_environment(ctx);
     update_creatures(ctx);
     update_homeostasis(ctx);
+
+    // 每3秒打印 L2+ 生物状态（调试用）
+    if (ctx->save.env.total_seconds % 3 == 0) {
+        for (int i = 0; i < ctx->save.creature_count; i++) {
+            struct creature *c = &ctx->save.creatures[i];
+            const struct species_def *sp = species_get_by_id(c->species_id);
+            if (!sp || sp->trophic_level == TROPHIC_L1) continue;
+            ESP_LOGI(TAG, "[%d] %s L%d pos(%d,%d) vel(%d,%d) sz=%d hunger=%d state=%d rest=%d decel=%d",
+                     i, sp->name, sp->trophic_level,
+                     c->pos_x, c->pos_y, c->vel_x, c->vel_y,
+                     c->size, c->hunger, c->state, c->rest_frames, c->decel_frames);
+        }
+    }
+}
+
+// ============================================================
+// 物理位置更新：由 engine_tick() 每帧(33ms/30FPS)调用
+// 帧间隔运动模型 + 停歇减速
+//   巡游: L2=5px/s, L3=8px/s, L4=10px/s
+//   追猎: L3=25px/s, L4=25px/s
+//   逃跑: L2=12px/s, L3=25px/s
+//   停歇: 随机1~3秒静止，停前有减速过渡
+// ============================================================
+void engine_physics_update(struct game_context *ctx)
+{
+    if (!ctx) return;
+
+    uint32_t fc = ctx->frame_count;
+
+    for (int i = 0; i < ctx->save.creature_count; i++) {
+        struct creature *c = &ctx->save.creatures[i];
+        const struct species_def *sp = species_get_by_id(c->species_id);
+        if (!sp) continue;
+
+        // L1 植物不移动
+        if (sp->trophic_level == TROPHIC_L1) continue;
+
+        // ─── 判断是否处于加速状态（追猎/逃跑） ───
+        bool is_accel = (c->vel_x > 1 || c->vel_x < -1 || c->vel_y > 1 || c->vel_y < -1);
+
+        // ─── 停歇状态：倒计时中不移动 ───
+        if (c->rest_frames > 0) {
+            c->rest_frames--;
+            continue;
+        }
+
+        // ─── 减速阶段：逐渐变慢，结束后进入停歇 ───
+        if (c->decel_frames > 0) {
+            c->decel_frames--;
+            // 渐进减速：前半段每3帧移1px，后半段每6帧移1px
+            bool decel_move = false;
+            if (c->decel_frames > 10) {
+                decel_move = (fc % 3 == 0); // 前半段：约10px/s → 稍慢
+            } else {
+                decel_move = (fc % 6 == 0); // 后半段：约5px/s → 极慢
+            }
+            // 减速结束 → 进入停歇
+            if (c->decel_frames == 0) {
+                c->vel_x = 0;
+                c->vel_y = 0;
+                // 停歇 1~3 秒（30~90帧）
+                c->rest_frames = 30 + (esp_random() % 61);
+                continue;
+            }
+            if (!decel_move) continue;
+            // 减速期间仍移动（慢）
+            goto do_move;
+        }
+
+        // ─── 巡游状态：随机触发减速→停歇 ───
+        if (!is_accel && c->vel_x != 0) {
+            // 每10帧检查一次（每秒3次），每次 8% 概率开始减速
+            // 平均约 4~5 秒停歇一次，符合自然观感
+            if (fc % 10 == 0 && (esp_random() % 100) < 8) {
+                // 进入减速阶段（约0.7秒 = 20帧的减速过渡）
+                c->decel_frames = 20;
+                continue;
+            }
+        }
+
+        // ─── 帧间隔判断 ───
+        {
+            bool should_move = false;
+
+            if (is_accel) {
+                // 加速状态（追猎/逃跑）
+                switch (sp->trophic_level) {
+                    case TROPHIC_L2:
+                        // L2 逃跑：12px/s → 每2~3帧移动1px（约每2.5帧）
+                        // 用交替模式：5帧中移动2帧
+                        should_move = (fc % 5 < 2);
+                        break;
+                    case TROPHIC_L3:
+                        // L3 追猎/逃跑：25px/s → 5帧中移动4帧
+                        should_move = (fc % 5 != 0);
+                        break;
+                    default: // L4A, L4B
+                        // L4 追猎：25px/s → 5帧中移动4帧
+                        should_move = (fc % 5 != 0);
+                        break;
+                }
+            } else {
+                // 巡游状态：慢悠悠
+                switch (sp->trophic_level) {
+                    case TROPHIC_L2:
+                        // L2 巡游：5px/s → 每6帧移动1px
+                        should_move = (fc % 6 == 0);
+                        break;
+                    case TROPHIC_L3:
+                        // L3 巡游：8px/s → 每4帧移动1px（实际7.5px/s，近似8）
+                        should_move = (fc % 4 == 0);
+                        break;
+                    default: // L4A, L4B
+                        // L4 巡游：10px/s → 每3帧移动1px
+                        should_move = (fc % 3 == 0);
+                        break;
+                }
+            }
+
+            if (!should_move) continue;
+        }
+
+do_move:
+        // ─── 应用位移（每次仅移动1px，方向由vel符号决定） ───
+        {
+            int8_t dx = 0, dy = 0;
+            if (c->vel_x > 0) dx = 1;
+            else if (c->vel_x < 0) dx = -1;
+            if (c->vel_y > 0) dy = 1;
+            else if (c->vel_y < 0) dy = -1;
+
+            c->pos_x += dx;
+            c->pos_y += dy;
+        }
+
+        // ─── 边界弹回（反转方向，保持运动） ───
+        if (c->pos_x <= 0) {
+            c->pos_x = 1;
+            if (c->vel_x < 0) c->vel_x = -c->vel_x;
+            c->facing_right = true;
+        }
+        if (c->pos_x >= 120) {
+            c->pos_x = 119;
+            if (c->vel_x > 0) c->vel_x = -c->vel_x;
+            c->facing_right = false;
+        }
+        if (c->pos_y <= 0) {
+            c->pos_y = 1;
+            if (c->vel_y < 0) c->vel_y = -c->vel_y;
+        }
+        if (c->pos_y >= 120) {
+            c->pos_y = 119;
+            if (c->vel_y > 0) c->vel_y = -c->vel_y;
+        }
+
+        // ─── 加速衰减：追猎/逃跑状态回归巡游 ───
+        if (is_accel && (fc % 12 == 0)) {
+            if (c->vel_x > 1) c->vel_x--;
+            else if (c->vel_x < -1) c->vel_x++;
+            if (c->vel_y > 1) c->vel_y--;
+            else if (c->vel_y < -1) c->vel_y++;
+        }
+    }
 }

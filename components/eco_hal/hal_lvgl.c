@@ -189,7 +189,7 @@ void hal_lvgl_port_task(void *arg)
 
     esp_task_wdt_add(NULL);
 
-    int loop_count = 0;
+    TickType_t last_log_tick = xTaskGetTickCount();
     while (1) {
         
         esp_task_wdt_reset();
@@ -204,9 +204,11 @@ void hal_lvgl_port_task(void *arg)
             task_delay_ms = 10;
         }
 
-        loop_count++;
-        if (loop_count % 1000 == 0) {
-            ESP_LOGI(TAG, "LVGL task alive (loop=%d)", loop_count);
+        // 每10秒输出一次心跳
+        TickType_t now_tick = xTaskGetTickCount();
+        if ((now_tick - last_log_tick) >= pdMS_TO_TICKS(10000)) {
+            ESP_LOGI(TAG, "LVGL task alive");
+            last_log_tick = now_tick;
         }
 
         vTaskDelay(pdMS_TO_TICKS(task_delay_ms));

@@ -85,6 +85,8 @@ struct creature {
     uint8_t growth_pts;     // 成长点
     uint8_t mood;           // 心情 (0-100)
     uint8_t state;          // 状态: 0=正常, 1=睡眠, 2=死亡倒计时
+    uint8_t rest_frames;    // 停歇倒计时(帧数): >0时静止不动, 0=运动中
+    uint8_t decel_frames;   // 减速阶段帧数: >0时正在减速, 0=正常速度
     uint16_t age_seconds;   // 存活时间(秒)
     uint16_t sleep_timer;   // 睡眠/死亡倒计时(秒)
     bool facing_right;      // 朝向

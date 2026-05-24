@@ -5,6 +5,7 @@
 #include "engine_main.h"
 #include "hal_audio.h"
 #include "hal_display.h"
+#include "hal_pmu.h"
 #include "esp_log.h"
 #include <string.h>
 #include <time.h>
@@ -732,6 +733,8 @@ static void btn_reset_cb(lv_event_t *e)
     struct game_context *ctx = engine_get_context();
     if (ctx) {
         engine_reset_game(&ctx->save);
+        // 刷新标题页面上的统计数据（coins、species等）
+        ui_screen_title_update(&ctx->save);
         ui_popup_show_reward("Reset", "Game data cleared!");
     }
 }
@@ -894,7 +897,6 @@ void ui_ambient_enter(void)
         lv_obj_set_pos(g_ambient_battery, 300, 20);
         lv_obj_set_style_text_color(g_ambient_battery, lv_color_make(0, 255, 100), 0);
         lv_obj_set_style_text_font(g_ambient_battery, &lv_font_montserrat_14, 0);
-        lv_label_set_text(g_ambient_battery, "75%");
 
         // 主鱼色块（简化动画）
         g_ambient_fish = lv_obj_create(g_ambient_screen);
@@ -902,6 +904,24 @@ void ui_ambient_enter(void)
         lv_obj_set_style_radius(g_ambient_fish, LV_RADIUS_CIRCLE, 0);
         lv_obj_set_style_bg_color(g_ambient_fish, lv_color_make(0, 150, 255), 0);
         lv_obj_set_style_border_width(g_ambient_fish, 0, 0);
+    }
+
+    // 进入时立即读取真实电量
+    {
+        uint8_t pct = hal_pmu_get_battery_percent();
+        bool charging = hal_pmu_is_charging();
+        char bat_buf[12];
+        if (charging) {
+            snprintf(bat_buf, sizeof(bat_buf), "+%d%%", pct);
+        } else {
+            snprintf(bat_buf, sizeof(bat_buf), "%d%%", pct);
+        }
+        lv_label_set_text(g_ambient_battery, bat_buf);
+        if (pct <= 15) {
+            lv_obj_set_style_text_color(g_ambient_battery, lv_color_make(255, 60, 60), 0);
+        } else {
+            lv_obj_set_style_text_color(g_ambient_battery, lv_color_make(0, 255, 100), 0);
+        }
     }
 
     lv_scr_load(g_ambient_screen);
@@ -930,13 +950,35 @@ void ui_ambient_update(void)
 
     g_ambient_frame++;
 
-    // 每秒更新一次时间（1 FPS）
-    if (g_ambient_frame % (1000 / ENGINE_TICK_MS) == 0) { // 每秒更新一次（基于 ENGINE_TICK_MS）
+    uint32_t frames_per_sec = 1000 / ENGINE_TICK_MS; // 30 FPS
+
+    // 每秒更新时间
+    if (g_ambient_frame % frames_per_sec == 0) {
         time_t now = time(NULL);
         struct tm *tm_info = localtime(&now);
         char buf[16];
         snprintf(buf, sizeof(buf), "%02d:%02d", tm_info->tm_hour, tm_info->tm_min);
         lv_label_set_text(g_ambient_time, buf);
+    }
+
+    // 每 30 秒刷新电量（HAL 层有缓存，不会频繁 I2C）
+    if (g_ambient_frame % (frames_per_sec * 30) == 0) {
+        uint8_t pct = hal_pmu_get_battery_percent();
+        bool charging = hal_pmu_is_charging();
+        char bat_buf[12];
+        if (charging) {
+            snprintf(bat_buf, sizeof(bat_buf), "+%d%%", pct);
+        } else {
+            snprintf(bat_buf, sizeof(bat_buf), "%d%%", pct);
+        }
+        lv_label_set_text(g_ambient_battery, bat_buf);
+
+        // 低电量变红
+        if (pct <= 15) {
+            lv_obj_set_style_text_color(g_ambient_battery, lv_color_make(255, 60, 60), 0);
+        } else {
+            lv_obj_set_style_text_color(g_ambient_battery, lv_color_make(0, 255, 100), 0);
+        }
     }
 
     // 简单游动动画（正弦波）
