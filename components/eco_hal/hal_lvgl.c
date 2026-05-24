@@ -205,7 +205,7 @@ void hal_lvgl_port_task(void *arg)
         }
 
         loop_count++;
-        if (loop_count % 200 == 0) {
+        if (loop_count % 1000 == 0) {
             ESP_LOGI(TAG, "LVGL task alive (loop=%d)", loop_count);
         }
 

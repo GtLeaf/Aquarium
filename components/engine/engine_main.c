@@ -184,8 +184,8 @@ bool engine_apply_event_reward(struct game_save *save, uint8_t event_id)
                 c->species_id = reward.species_id;
                 c->stage = STAGE_JUVENILE;
                 c->size = sp->size_base;
-                c->pos_x = (int8_t)(50 + (esp_random() % 50));
-                c->pos_y = (int8_t)(50 + (esp_random() % 50));
+                c->pos_x = (int8_t)(84 + (esp_random() % 200));
+                c->pos_y = (int8_t)(124 + (esp_random() % 200));
                 c->hunger = 30;
                 c->mood = 80;
                 c->state = 0;

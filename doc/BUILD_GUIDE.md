@@ -13,7 +13,7 @@
 
 | 脚本 | 环境 | 支持的操作 | 构建能力 |
 |---|---|---|---|
-| `flash_and_monitor.cmd` | CMD / 批处理 | `flash` / `monitor` / `all` | ❌ 不支持 build |
+| `build_flash_monitor.cmd` | CMD / 批处理 | `build` / `flash` / `monitor` / `all` | ✅ 支持 build |
 | `build_flash_monitor.ps1` | **PowerShell** | `build` / `flash` / `monitor` / `all` / `clean` / `fullclean` | ✅ 支持 build |
 
 **推荐**：在 PowerShell 环境下优先使用 `build_flash_monitor.ps1`，功能更完整。
@@ -110,11 +110,11 @@ cd build
 
 ## 4. 烧录命令（两种环境通用）
 
-### 方法 A：flash_and_monitor.cmd（CMD / MSYS bash 都可用）
+### 方法 A：build_flash_monitor.cmd（CMD / MSYS bash 都可用）
 
 ```bash
 cd /d/Study/ESP32/hello_world
-./flash_and_monitor.cmd flash
+./build_flash_monitor.cmd flash
 ```
 
 ### 方法 B：build_flash_monitor.ps1（PowerShell）
@@ -144,7 +144,51 @@ Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
 
 ---
 
-## 5. 串口日志读取（无 TTY 的替代方案）
+## 5. 环境变量说明（重要）
+
+ESP-IDF v6.0.1 的 `idf.py` 依赖多个环境变量，缺失会导致构建失败。
+
+### 5.1 通过桌面快捷方式启动（推荐）
+
+双击桌面快捷方式 **`IDF_v6.0.1_Powershell`**，它会自动加载：
+```
+C:\Espressif\tools\Microsoft.v6.0.1.PowerShell_profile.ps1
+```
+
+该 profile 会自动设置所有环境变量、PATH、以及 `idf.py` 别名。
+
+### 5.2 手动设置环境变量
+
+如果无法使用桌面快捷方式，在 PowerShell 中手动执行：
+
+```powershell
+# 核心环境变量
+$env:IDF_PATH = "D:\softwareInstall\ESPIDF\v6.0.1\esp-idf"
+$env:IDF_TOOLS_PATH = "C:\Espressif\tools"
+$env:IDF_PYTHON_ENV_PATH = "C:\Espressif\tools\python\v6.0.1\venv"
+$env:ESP_IDF_VERSION = "6.0"  # 注意：必须是 "6.0"，不能是 "6.0.1"
+
+# 扩展 PATH（必须包含 cmake 和 ninja）
+$env:PATH = "C:\Espressif\tools\cmake\4.0.3\bin;C:\Espressif\tools\ninja\1.12.1;" + $env:PATH
+
+# 可选但建议设置
+$env:IDF_COMPONENT_LOCAL_STORAGE_URL = "file://C:\Espressif\tools"
+$env:ESP_ROM_ELF_DIR = "C:\Espressif\tools\esp-rom-elfs\20241011"
+```
+
+> **注意**：`ESP_IDF_VERSION` 必须是 `"6.0"`（不含补丁版本号）。如果设为 `"6.0.1"`，`idf_component_manager` 的 `Version.coerce()` 会解析失败，报错 `TypeError: expected string or bytes-like object, got 'NoneType'`。
+
+### 5.3 常见环境错误
+
+| 错误 | 原因 | 解决 |
+|---|---|---|
+| `TypeError: expected string or bytes-like object, got 'NoneType'` | `ESP_IDF_VERSION` 未设置或格式错误 | 设置为 `"6.0"` |
+| `"cmake" must be available on the PATH to use idf.py` | PATH 中缺少 cmake | 将 `C:\Espressif\tools\cmake\4.0.3\bin` 加入 PATH |
+| `MSys/Mingw is no longer supported` | 在 MSYS bash 中运行 `idf.py` | 切换到 PowerShell 或使用 `cmake.exe --build .` |
+
+---
+
+## 6. 串口日志读取（无 TTY 的替代方案）
 
 `idf.py monitor` 需要 TTY，在后台/脚本中无法使用。改用 PowerShell 读取：
 
@@ -175,7 +219,51 @@ while (((Get-Date) - \$start).TotalSeconds -lt 15) {
 
 ---
 
-## 6. 一键完整流程（MSYS Bash 环境）
+## 7. 一键完整流程（PowerShell 环境 - 推荐）
+
+### 方法 A：通过桌面快捷方式启动（最可靠）
+
+1. 双击桌面 **`IDF_v6.0.1_Powershell`** 快捷方式
+2. 在打开的 PowerShell 中执行：
+
+```powershell
+cd D:\Study\ESP32\hello_world
+idf.py build          # 构建
+idf.py -p COM3 flash  # 烧录
+idf.py -p COM3 monitor # 监视
+```
+
+### 方法 B：手动设置环境后执行
+
+```powershell
+# 1. 设置环境变量
+$env:IDF_PATH = "D:\softwareInstall\ESPIDF\v6.0.1\esp-idf"
+$env:IDF_TOOLS_PATH = "C:\Espressif\tools"
+$env:IDF_PYTHON_ENV_PATH = "C:\Espressif\tools\python\v6.0.1\venv"
+$env:ESP_IDF_VERSION = "6.0"
+$env:PATH = "C:\Espressif\tools\cmake\4.0.3\bin;C:\Espressif\tools\ninja\1.12.1;" + $env:PATH
+
+# 2. 进入项目目录
+cd D:\Study\ESP32\hello_world
+
+# 3. 构建 + 烧录 + 监视
+C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe D:\softwareInstall\ESPIDF\v6.0.1\esp-idf\tools\idf.py build
+C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe D:\softwareInstall\ESPIDF\v6.0.1\esp-idf\tools\idf.py -p COM3 -b 460800 flash
+C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe D:\softwareInstall\ESPIDF\v6.0.1\esp-idf\tools\idf.py -p COM3 monitor
+```
+
+### 方法 C：使用 build_flash_monitor.ps1 脚本
+
+```powershell
+cd D:\Study\ESP32\hello_world
+.\build_flash_monitor.ps1 all   # 构建 + 烧录（注意：此脚本内部也会设置环境变量）
+```
+
+> **注意**：`build_flash_monitor.ps1` 在 `fullclean` 后会删除 `build/` 目录，但 `flash` 命令可能不会自动重新构建。建议用 `all` 参数或先 `build` 再 `flash`。
+
+---
+
+## 8. 一键完整流程（MSYS Bash 环境）
 
 ```bash
 # 1. 进入项目目录
@@ -190,7 +278,7 @@ cd build
 
 # 4. 烧录
 cd /d/Study/ESP32/hello_world
-./flash_and_monitor.cmd flash
+./build_flash_monitor.cmd flash
 ```
 
 ---
@@ -205,7 +293,7 @@ cd D:\Study\ESP32\hello_world
 
 ---
 
-## 8. 常见错误
+## 9. 常见错误
 
 | 错误 | 原因 | 解决 |
 |---|---|---|
@@ -214,10 +302,13 @@ cd D:\Study\ESP32\hello_world
 | `No such file or directory` (cmake) | CMake 路径不对 | 确认路径 `/c/Espressif/tools/cmake/4.0.3/bin/cmake.exe` |
 | 构建无变化 | 未修改源文件 | 确认修改了 `.c` 文件而非头文件缓存问题 |
 | `idf.py: command not found` | 未激活 ESP-IDF 环境 | 用 `build_flash_monitor.ps1` 或在 PowerShell 中执行 |
+| `TypeError: expected string or bytes-like object, got 'NoneType'` | `ESP_IDF_VERSION` 未设置或格式错误 | 设置为 `"6.0"`（不能是 `"6.0.1"`） |
+| `"cmake" must be available on the PATH` | PATH 中缺少 cmake | 将 `C:\Espressif\tools\cmake\4.0.3\bin` 加入 PATH |
+| `fullclean` 后烧录的还是旧固件 | `flash` 没有触发重新构建 | 使用 `all` 参数，或先 `build` 再 `flash` |
 
 ---
 
-## 9. 文件路径速查
+## 10. 文件路径速查
 
 | 文件/目录 | 路径 |
 |---|---|
@@ -225,10 +316,12 @@ cd D:\Study\ESP32\hello_world
 | 构建目录 | `d:\Study\ESP32\hello_world\build` |
 | 固件二进制 | `build\esp32s3_touch_amoled_18.bin` |
 | CMake 可执行文件 | `C:\Espressif\tools\cmake\4.0.3\bin\cmake.exe` |
-| 烧录脚本 (CMD) | `flash_and_monitor.cmd` |
+| 构建/烧录脚本 (CMD) | `build_flash_monitor.cmd` |
 | 构建脚本 (PowerShell) | `build_flash_monitor.ps1` |
 | ESP-IDF 根目录 | `D:\softwareInstall\ESPIDF\v6.0.1\esp-idf` |
 | Python venv | `C:\Espressif\tools\python\v6.0.1\venv\Scripts\python.exe` |
+| PowerShell Profile | `C:\Espressif\tools\Microsoft.v6.0.1.PowerShell_profile.ps1` |
+| 桌面快捷方式 | `C:\Users\GtLeaf\Desktop\IDF_v6.0.1_Powershell.lnk` |
 
 ---
 
