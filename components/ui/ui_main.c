@@ -13,7 +13,7 @@ static const char *TAG = "ui";
 
 // 无操作计时器（毫秒）
 static uint32_t s_idle_timer_ms = 0;
-#define AMBIENT_ENTER_MS (30 * 1000) // 60秒无操作进入伴侣模式
+#define AMBIENT_ENTER_MS (60 * 1000) // 60秒无操作进入伴侣模式
 #define AMBIENT_UPDATE_MS 1000       // 伴侣模式 1 FPS
 
 // 离线收益弹窗已显示标记

@@ -142,6 +142,7 @@ void save_gamesave_init_default(struct game_save *save)
 
     // 默认生物：螺旋藻 + 黑壳虾 + 灯科鱼
     save->creature_count = 3;
+    save->creatures[0].creature_id = 1;
     save->creatures[0].species_id = 1;  // 螺旋藻
     save->creatures[0].stage = STAGE_ADULT;
     save->creatures[0].size = 15;
@@ -150,6 +151,7 @@ void save_gamesave_init_default(struct game_save *save)
     save->creatures[0].hunger = 0;
     save->creatures[0].mood = 80;
 
+    save->creatures[1].creature_id = 2;
     save->creatures[1].species_id = 6;  // 黑壳虾
     save->creatures[1].stage = STAGE_ADULT;
     save->creatures[1].size = 20;
@@ -158,6 +160,7 @@ void save_gamesave_init_default(struct game_save *save)
     save->creatures[1].hunger = 20;
     save->creatures[1].mood = 70;
 
+    save->creatures[2].creature_id = 3;
     save->creatures[2].species_id = 10; // 灯科鱼
     save->creatures[2].stage = STAGE_ADULT;
     save->creatures[2].size = 25;
@@ -215,25 +218,63 @@ esp_err_t save_gamesave_write(const struct game_save *save)
     return ret;
 }
 
+// 版本迁移：从旧版本存档迁移到新版本
+static void save_migrate(struct game_save *save, uint32_t old_version)
+{
+    if (!save) return;
+
+    ESP_LOGI(TAG, "Migrating save from version %lu to %d", (unsigned long)old_version, SAVE_VERSION);
+
+    if (old_version < 3) {
+        // v1/v2 -> v3: 新增 achievements_unlocked 字段
+        save->achievements_unlocked = 0;
+    }
+
+    save->version = SAVE_VERSION;
+    ESP_LOGI(TAG, "Save migrated successfully");
+}
+
 esp_err_t save_gamesave_read(struct game_save *save)
 {
     if (!save) return ESP_ERR_INVALID_ARG;
 
     // 先尝试读取主存档
     esp_err_t ret = save_read(SAVE_KEY_GAMESAVE, save, sizeof(struct game_save));
-    if (ret == ESP_OK && save_validate(save)) {
-        ESP_LOGI(TAG, "Main save loaded, creatures=%d", save->creature_count);
-        return ESP_OK;
+    if (ret == ESP_OK) {
+        if (save_validate(save)) {
+            ESP_LOGI(TAG, "Main save loaded, creatures=%d", save->creature_count);
+            return ESP_OK;
+        }
+        // 版本不匹配，尝试迁移
+        if (save->magic == SAVE_MAGIC && save->version < SAVE_VERSION) {
+            ESP_LOGW(TAG, "Save version old: %lu, migrating...", (unsigned long)save->version);
+            save_migrate(save, save->version);
+            // 迁移后重新计算 CRC 并保存
+            save->crc32 = 0;
+            save->crc32 = save_crc32(save, offsetof(struct game_save, crc32));
+            save_write(SAVE_KEY_GAMESAVE, save, sizeof(struct game_save));
+            return ESP_OK;
+        }
     }
 
-    // 主存档损坏，尝试备份
+    // 主存档损坏或无法迁移，尝试备份
     ESP_LOGW(TAG, "Main save invalid or missing, trying backup...");
     ret = save_read(SAVE_KEY_BACKUP, save, sizeof(struct game_save));
-    if (ret == ESP_OK && save_validate(save)) {
-        ESP_LOGI(TAG, "Backup save loaded");
-        // 恢复主存档
-        save_write(SAVE_KEY_GAMESAVE, save, sizeof(struct game_save));
-        return ESP_OK;
+    if (ret == ESP_OK) {
+        if (save_validate(save)) {
+            ESP_LOGI(TAG, "Backup save loaded");
+            // 恢复主存档
+            save_write(SAVE_KEY_GAMESAVE, save, sizeof(struct game_save));
+            return ESP_OK;
+        }
+        if (save->magic == SAVE_MAGIC && save->version < SAVE_VERSION) {
+            ESP_LOGW(TAG, "Backup save version old: %lu, migrating...", (unsigned long)save->version);
+            save_migrate(save, save->version);
+            save->crc32 = 0;
+            save->crc32 = save_crc32(save, offsetof(struct game_save, crc32));
+            save_write(SAVE_KEY_GAMESAVE, save, sizeof(struct game_save));
+            return ESP_OK;
+        }
     }
 
     ESP_LOGW(TAG, "No valid save found, initializing default");
@@ -248,8 +289,9 @@ bool save_validate(const struct game_save *save)
         ESP_LOGW(TAG, "Bad magic: 0x%08lx", (unsigned long)save->magic);
         return false;
     }
-    if (save->version != SAVE_VERSION) {
-        ESP_LOGW(TAG, "Version mismatch: %lu vs %d", (unsigned long)save->version, SAVE_VERSION);
+    // 允许旧版本通过验证，由调用者执行迁移
+    if (save->version > SAVE_VERSION) {
+        ESP_LOGW(TAG, "Version too new: %lu vs %d", (unsigned long)save->version, SAVE_VERSION);
         return false;
     }
     uint32_t crc = save_crc32(save, offsetof(struct game_save, crc32));

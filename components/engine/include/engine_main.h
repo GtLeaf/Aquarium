@@ -32,6 +32,9 @@ struct game_context {
 // 获取全局游戏上下文
 struct game_context* engine_get_context(void);
 
+// 分配唯一生物ID（save 用于溢出时扫描回收；返回 0 表示 ID 耗尽）
+uint16_t engine_alloc_creature_id(struct game_save *save);
+
 esp_err_t engine_init(void);
 void engine_tick(void);
 void engine_set_state(enum game_state new_state);

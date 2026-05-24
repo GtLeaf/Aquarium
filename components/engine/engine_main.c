@@ -14,10 +14,64 @@ static struct game_context s_ctx = {0};
 static struct event_trigger_state s_event_state = {0};
 static struct achievement_state s_achv_state = {0};
 static uint32_t s_tick_ms = 0;
+static uint16_t s_next_creature_id = 1;
 
 struct game_context* engine_get_context(void)
 {
     return &s_ctx;
+}
+
+static void refresh_next_creature_id(const struct game_save *save)
+{
+    if (!save) return;
+    uint16_t max_id = 0;
+    for (int i = 0; i < save->creature_count; i++) {
+        if (save->creatures[i].creature_id > max_id) {
+            max_id = save->creatures[i].creature_id;
+        }
+    }
+    if (max_id == 0xFFFF) {
+        // 已达 uint16_t 上限，下次分配时触发溢出扫描回收
+        s_next_creature_id = 0;
+    } else {
+        s_next_creature_id = max_id + 1;
+    }
+}
+
+static bool creature_id_exists(const struct game_save *save, uint16_t id)
+{
+    if (!save || id == 0) return false;
+    for (int i = 0; i < save->creature_count; i++) {
+        if (save->creatures[i].creature_id == id) {
+            return true;
+        }
+    }
+    return false;
+}
+
+uint16_t engine_alloc_creature_id(struct game_save *save)
+{
+    // 正常路径：顺序分配
+    uint16_t id = s_next_creature_id;
+    s_next_creature_id++;
+
+    // 溢出保护：uint16_t 回绕到 0 时，扫描回收空闲 ID
+    if (s_next_creature_id == 0) {
+        s_next_creature_id = 1;
+        for (uint16_t probe = 1; probe != 0; probe++) {
+            if (!creature_id_exists(save, probe)) {
+                s_next_creature_id = probe;
+                id = probe;
+                break;
+            }
+        }
+        // 若全部 65535 个 ID 都被占用，返回 0 表示失败
+        if (id == 0 || creature_id_exists(save, id)) {
+            ESP_LOGW(TAG, "Creature ID exhausted!");
+            return 0;
+        }
+    }
+    return id;
 }
 
 // 缸等级对应离线收益上限（小时）和系数
@@ -97,6 +151,9 @@ esp_err_t engine_init(void)
         save_gamesave_init_default(&s_ctx.save);
     }
 
+    // 同步全局 creature_id 计数器
+    refresh_next_creature_id(&s_ctx.save);
+
     // 计算离线收益
     time_t now = time(NULL);
     struct offline_reward reward = engine_calc_offline_reward(&s_ctx.save, (uint32_t)now);
@@ -117,6 +174,8 @@ esp_err_t engine_init(void)
 
     // 初始化成就系统
     achievement_init(&s_achv_state);
+    // 从存档恢复已解锁的成就状态
+    s_achv_state.achievements_unlocked = s_ctx.save.achievements_unlocked;
 
     ESP_LOGI(TAG, "Engine ready, state=%d, creatures=%d, coins=%lu",
              s_ctx.state, s_ctx.save.creature_count,
@@ -181,6 +240,12 @@ bool engine_apply_event_reward(struct game_save *save, uint8_t event_id)
             const struct species_def *sp = species_get_by_id(reward.species_id);
             if (sp) {
                 struct creature *c = &save->creatures[save->creature_count];
+                uint16_t cid = engine_alloc_creature_id(save);
+                if (cid == 0) {
+                    ESP_LOGW(TAG, "Event reward: creature ID exhausted, skip");
+                    return true; // 奖励已应用（物种已解锁），只是无法添加生物
+                }
+                c->creature_id = cid;
                 c->species_id = reward.species_id;
                 c->stage = STAGE_JUVENILE;
                 c->size = sp->size_base;
@@ -190,7 +255,7 @@ bool engine_apply_event_reward(struct game_save *save, uint8_t event_id)
                 c->mood = 80;
                 c->state = 0;
                 save->creature_count++;
-                ESP_LOGI(TAG, "Event reward: new creature %s added", sp->name);
+                ESP_LOGI(TAG, "Event reward: new creature %s added (id=%u)", sp->name, cid);
             }
         }
     }
@@ -277,6 +342,13 @@ bool engine_buy_species(struct game_save *save, uint8_t species_id)
 
     save->photosynth_coins -= price;
     struct creature *c = &save->creatures[save->creature_count];
+    uint16_t cid = engine_alloc_creature_id(save);
+    if (cid == 0) {
+        ESP_LOGW(TAG, "Buy species: creature ID exhausted, refund");
+        save->photosynth_coins += price; // 回退扣款
+        return false;
+    }
+    c->creature_id = cid;
     c->species_id = species_id;
     c->stage = STAGE_JUVENILE;
     c->size = sp->size_base;
@@ -351,7 +423,13 @@ void engine_try_breed(struct game_save *save)
 
         // 30% 概率繁殖
         if ((esp_random() % 100) < 30) {
+            uint16_t cid = engine_alloc_creature_id(save);
+            if (cid == 0) {
+                ESP_LOGW(TAG, "Breed: creature ID exhausted, skip");
+                break;
+            }
             struct creature *baby = &save->creatures[save->creature_count];
+            baby->creature_id = cid;
             baby->species_id = parent_a->species_id;
             baby->stage = STAGE_JUVENILE;
             baby->size = sp->size_base / 2;
@@ -410,6 +488,8 @@ void engine_tick(void)
         if (achv_timer >= 10) {
             achv_timer = 0;
             achievement_check(&s_achv_state, &s_ctx.save);
+            // 将成就解锁状态同步回存档，确保持久化
+            s_ctx.save.achievements_unlocked = s_achv_state.achievements_unlocked;
         }
     }
 

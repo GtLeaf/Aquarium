@@ -47,6 +47,7 @@ struct species_def {
 
 // 生物实例
 struct creature {
+    uint16_t creature_id;   // 唯一生物ID（全局递增，1起）
     uint8_t species_id;     // 物种ID
     uint8_t stage;          // 当前阶段
     uint8_t size;           // 当前体型 (1-100)
@@ -94,6 +95,8 @@ struct game_save {
 
     uint8_t today_events;       // 今日已触发事件数
     uint8_t day_of_year;        // 当前日期 (用于每日重置)
+
+    uint64_t achievements_unlocked; // 成就解锁位图 (ACHV_COUNT <= 64)
 };
 
 // 事件定义

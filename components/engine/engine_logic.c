@@ -209,9 +209,10 @@ static void update_creatures(struct game_context *ctx)
         // §4.5 饥饿增长：每分钟 +0.5 => 每 120s +1
         // L1 不饥饿
         if (sp->trophic_level != TROPHIC_L1) {
-            if ((ctx->frame_count % 120) == (uint32_t)(i * 7 % 120)) {
+            if ((ctx->frame_count % 10) == (uint32_t)(i * 7 % 10)) {
                 if (c->hunger < 100) c->hunger++;
             }
+            // ESP_LOGI(TAG, "species_id:%d, hunger:%d", c->species_id, c->hunger);
         }
 
         // 觅食AI
@@ -359,19 +360,25 @@ static void update_homeostasis(struct game_context *ctx)
                 uint8_t target_level = ((esp_random() % 2) == 0) ? TROPHIC_L2 : TROPHIC_L3;
                 const struct species_def *sp = species_get_random(target_level, RARITY_COMMON);
                 if (sp) {
-                    struct creature *c = &ctx->save.creatures[ctx->save.creature_count];
-                    memset(c, 0, sizeof(*c));
-                    c->species_id = sp->id;
-                    c->stage = STAGE_JUVENILE;
-                    c->size = sp->size_base;
-                    c->pos_x = (int8_t)(esp_random() % 120);
-                    c->pos_y = (int8_t)(esp_random() % 120);
-                    c->hunger = 30;
-                    c->mood = 70;
-                    c->state = 0;
-                    ctx->save.creature_count++;
-                    ESP_LOGI(TAG, "Wild visitor: %s drifted in!", sp->name);
-                    ctx->dirty = true;
+                    uint16_t cid = engine_alloc_creature_id(&ctx->save);
+                    if (cid == 0) {
+                        ESP_LOGW(TAG, "Wild visitor: creature ID exhausted, skip");
+                    } else {
+                        struct creature *c = &ctx->save.creatures[ctx->save.creature_count];
+                        memset(c, 0, sizeof(*c));
+                        c->creature_id = cid;
+                        c->species_id = sp->id;
+                        c->stage = STAGE_JUVENILE;
+                        c->size = sp->size_base;
+                        c->pos_x = (int8_t)(esp_random() % 120);
+                        c->pos_y = (int8_t)(esp_random() % 120);
+                        c->hunger = 30;
+                        c->mood = 70;
+                        c->state = 0;
+                        ctx->save.creature_count++;
+                        ESP_LOGI(TAG, "Wild visitor: %s drifted in!", sp->name);
+                        ctx->dirty = true;
+                    }
                 }
             }
         }
