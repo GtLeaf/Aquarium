@@ -25,6 +25,7 @@ void ui_screen_collection_hide(void);
 void ui_screen_shop_create(void);
 void ui_screen_shop_show(const struct game_save *save);
 void ui_screen_shop_hide(void);
+void ui_shop_stop_fill(void);  // 停止分批填充 timer
 
 // 标题画面
 void ui_screen_title_create(void);

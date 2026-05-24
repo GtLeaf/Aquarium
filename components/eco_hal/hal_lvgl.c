@@ -194,8 +194,8 @@ void hal_lvgl_port_task(void *arg)
         
         esp_task_wdt_reset();
 
-        // UI 更新已移至主任务（engine_tick），避免阻塞 LVGL 渲染
-        // 此处仅执行 LVGL 定时器处理
+        // UI 更新
+        if (s_ui_update_cb) s_ui_update_cb();
         uint32_t task_delay_ms = lv_timer_handler();
         if (task_delay_ms > 500) {
             task_delay_ms = 500;

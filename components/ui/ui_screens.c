@@ -791,13 +791,12 @@ void ui_ambient_update(void)
 static lv_obj_t *g_shop_screen = NULL;
 lv_obj_t *g_shop_grid = NULL;
 static lv_obj_t *g_shop_coin_lbl = NULL;
-static lv_obj_t *g_shop_page_lbl = NULL;
-static uint8_t g_shop_page = 0;
-#define SHOP_ITEMS_PER_PAGE 6
-#define SHOP_TOTAL_PAGES ((MAX_SPECIES + SHOP_ITEMS_PER_PAGE - 1) / SHOP_ITEMS_PER_PAGE)
-static const struct game_save *g_shop_save_ref = NULL;  // 临时引用，用于翻页
+static const struct game_save *g_shop_save_ref = NULL;
 
-// 物种价格统一从 engine 获取
+// 分批填充商店列表（避免一次性创建过多对象触发 WDT）
+#define SHOP_BATCH_SIZE 3
+static lv_timer_t *s_shop_fill_timer = NULL;
+static int         s_shop_fill_index = 0;
 
 static void btn_shop_buy_cb(lv_event_t *e)
 {
@@ -833,19 +832,26 @@ static void btn_shop_buy_cb(lv_event_t *e)
     }
 }
 
-// Fill all species cards (scrollable list)
-static void shop_fill_all(const struct game_save *save)
+// 分批填充回调：每次创建 SHOP_BATCH_SIZE 个卡片，避免单帧耗时超过 WDT
+static void shop_fill_batch_cb(lv_timer_t *t)
 {
-    if (!g_shop_grid) return;
+    (void)t;
+    if (!g_shop_grid) {
+        lv_timer_del(t);
+        s_shop_fill_timer = NULL;
+        return;
+    }
 
-    // Clear old content
-    lv_obj_clean(g_shop_grid);
+    int count = species_get_count();
+    int end = s_shop_fill_index + SHOP_BATCH_SIZE;
+    if (end > count) end = count;
 
-    for (int i = 0; i < species_get_count(); i++) {
+    for (int i = s_shop_fill_index; i < end; i++) {
         const struct species_def *sp = species_get_by_id(i + 1);
         if (!sp) continue;
 
-        bool unlocked = save ? ((save->species_unlocked & (1ULL << i)) != 0) : false;
+        bool unlocked = g_shop_save_ref ?
+            ((g_shop_save_ref->species_unlocked & (1ULL << i)) != 0) : false;
         uint32_t price = engine_get_species_price(i + 1);
 
         // Card container: full width with padding
@@ -902,6 +908,41 @@ static void shop_fill_all(const struct game_save *save)
             lv_obj_set_user_data(buy_btn, (void *)(intptr_t)sp->id);
             lv_obj_add_event_cb(buy_btn, btn_shop_buy_cb, LV_EVENT_CLICKED, NULL);
         }
+    }
+
+    s_shop_fill_index = end;
+
+    if (s_shop_fill_index >= count) {
+        lv_timer_del(t);
+        s_shop_fill_timer = NULL;
+    }
+}
+
+// 启动分批填充商店列表
+static void shop_fill_list(const struct game_save *save)
+{
+    if (!g_shop_grid) return;
+
+    // 如果上一次填充还在进行，先停止
+    if (s_shop_fill_timer) {
+        lv_timer_del(s_shop_fill_timer);
+        s_shop_fill_timer = NULL;
+    }
+
+    lv_obj_clean(g_shop_grid);
+    s_shop_fill_index = 0;
+    g_shop_save_ref = save;
+
+    // 创建 0ms 周期 timer，每次回调填充一批
+    s_shop_fill_timer = lv_timer_create(shop_fill_batch_cb, 0, NULL);
+}
+
+// 停止商店填充（导航离开时调用）
+void ui_shop_stop_fill(void)
+{
+    if (s_shop_fill_timer) {
+        lv_timer_del(s_shop_fill_timer);
+        s_shop_fill_timer = NULL;
     }
 }
 
@@ -967,8 +1008,8 @@ void ui_screen_shop_show(const struct game_save *save)
         ESP_LOGW(TAG, "Shop coin_lbl=%p, save=%p", g_shop_coin_lbl, save);
     }
 
-    // Fill all items
-    shop_fill_all(save);
+    // Fill items in batches to avoid WDT
+    shop_fill_list(save);
 
     lv_scr_load(g_shop_screen);
 }

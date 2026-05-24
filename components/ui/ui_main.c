@@ -162,6 +162,9 @@ void ui_navigate_collection(void)
 // 返回主界面
 void ui_navigate_home(void)
 {
+    // 停止商店分批填充 timer（如果正在进行）
+    ui_shop_stop_fill();
+
     ui_screen_shop_hide();
     ui_screen_settings_hide();
     ui_screen_collection_hide();

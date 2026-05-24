@@ -264,13 +264,6 @@ bool hal_touch_read(int16_t *x, int16_t *y)
     int16_t raw_x = ((data[1] & 0x0F) << 8) | data[2];
     int16_t raw_y = ((data[3] & 0x0F) << 8) | data[4];
 
-    // START button area: x=114~254, y=320~368 (based on ui_screens.c)
-    // Also check RESET button: x=20~80, y=410~438
-    bool in_start_btn = (raw_x >= 114 && raw_x <= 254 && raw_y >= 320 && raw_y <= 368);
-    bool in_reset_btn = (raw_x >= 20 && raw_x <= 80 && raw_y >= 410 && raw_y <= 438);
-    const char *btn_hint = in_start_btn ? " [START]" : (in_reset_btn ? " [RESET]" : "");
-
-    // ESP_LOGI(TAG, "[#%d] TOUCH! pts=%d raw=(%d,%d)%s", read_count, touch_points, raw_x, raw_y, btn_hint);
 
     // 该批次 FT3168 直接输出接近屏幕分辨率的坐标，无需再映射
     *x = raw_x;
