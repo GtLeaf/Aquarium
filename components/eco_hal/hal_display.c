@@ -193,7 +193,8 @@ static void hal_display_apply_brightness(void)
     if (s_brightness_pending && io_handle) {
         s_brightness_pending = false;
         uint8_t brightness = s_pending_brightness;
-        esp_err_t ret = esp_lcd_panel_io_tx_param(io_handle, 0x51, &brightness, 1);
+        int lcd_cmd = (SH8601_CMD_BRIGHTNESS << 8) | (LCD_OPCODE_WRITE_CMD << 24);
+        esp_err_t ret = esp_lcd_panel_io_tx_param(io_handle, lcd_cmd, &brightness, 1);
         ESP_LOGI(TAG, "Brightness applied: %d, ret=%s", brightness, esp_err_to_name(ret));
     }
 }
