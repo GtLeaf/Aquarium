@@ -130,6 +130,7 @@ struct game_save {
 
     uint8_t brightness;    // 屏幕亮度 (0-255)
     uint8_t time_speed;    // 游戏时间流速档位 (0=0.5x, 1=1x, 2=2x, 3=4x, 4=8x)
+    uint8_t ambient_timeout; // 进入伴侣模式等待时间档位 (0=30s, 1=60s, 2=120s, 3=300s)
 };
 
 // 事件定义
@@ -146,6 +147,7 @@ struct event_def {
 
 // 获取物种定义
 const struct species_def* species_get_by_id(uint8_t id);
+const struct species_def* species_get_by_index(uint8_t index);
 const struct species_def* species_get_random(uint8_t trophic_level, uint8_t rarity);
 uint8_t species_get_count(void);
 

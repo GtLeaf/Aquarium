@@ -14,8 +14,19 @@ static const char *TAG = "ui";
 
 // 无操作计时器（毫秒）
 static uint32_t s_idle_timer_ms = 0;
-#define AMBIENT_ENTER_MS (60 * 1000) // 60秒无操作进入伴侣模式
 #define AMBIENT_UPDATE_MS 1000       // 伴侣模式 1 FPS
+
+// 根据档位获取进入伴侣模式的等待时间（毫秒）
+static uint32_t get_ambient_timeout_ms(uint8_t ambient_timeout)
+{
+    switch (ambient_timeout) {
+        case 0: return 30 * 1000;   // 30秒
+        case 1: return 60 * 1000;   // 60秒
+        case 2: return 120 * 1000;  // 120秒
+        case 3: return 300 * 1000;  // 300秒
+        default: return 60 * 1000;  // 默认60秒
+    }
+}
 
 // 离线收益弹窗已显示标记
 static bool s_offline_popup_shown = false;
@@ -77,7 +88,8 @@ void ui_update(void)
 
         ESP_LOGD(TAG, "s_idle_timer_ms：%d", s_idle_timer_ms);
         // 检查是否需要进入伴侣模式
-        if (s_idle_timer_ms >= AMBIENT_ENTER_MS) {
+        uint32_t ambient_timeout_ms = get_ambient_timeout_ms(ctx->save.ambient_timeout);
+        if (s_idle_timer_ms >= ambient_timeout_ms) {
             engine_set_state(STATE_AMBIENT_MODE);
             ui_ambient_enter();
             s_idle_timer_ms = 0;

@@ -455,6 +455,12 @@ uint8_t species_get_count(void)
     return MAX_SPECIES;
 }
 
+const struct species_def* species_get_by_index(uint8_t index)
+{
+    if (index >= MAX_SPECIES) return NULL;
+    return &species_db[index];
+}
+
 void species_init_database(void)
 {
     // 数据库已静态初始化，无需额外操作

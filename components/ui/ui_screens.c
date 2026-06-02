@@ -331,10 +331,33 @@ void ui_screen_main_update(const struct game_context *ctx)
             int16_t screen_x = (c->pos_x * 340) / 127 + 10;
             int16_t screen_y = (c->pos_y * 320) / 127 + 20;
 
-            // 大小根据体型
-            int16_t sz = sp->size_base / 3;
-            if (sz < 8) sz = 8;
-            if (sz > 32) sz = 32;
+            // 大小根据当前体型动态计算
+            // 基准大小 = size_base / 3（中等大小），再根据 c->size 比例调整
+            int16_t base_sz = sp->size_base / 3;
+            if (base_sz < 8) base_sz = 8;
+            if (base_sz > 32) base_sz = 32;
+
+            // 计算体型比例 (c->size / size_cap)
+            int ratio = 0;
+            if (sp->size_cap > 0) {
+                ratio = (c->size * 100) / sp->size_cap;
+            }
+
+            // 根据体型比例确定缩放系数
+            int16_t scale = 10; // 默认 1.0x
+            if (ratio < 30) {
+                scale = 7;      // 小: 0.7x
+            } else if (ratio < 70) {
+                scale = 10;     // 中: 1.0x
+            } else if (ratio < 90) {
+                scale = 13;     // 大: 1.3x
+            } else {
+                scale = 16;     // 巨大: 1.6x
+            }
+
+            int16_t sz = (base_sz * scale) / 10;
+            if (sz < 6) sz = 6;
+            if (sz > 50) sz = 50;
 
             if (sz != creature_cache[i].size) {
                 lv_obj_set_size(obj, sz, sz);
@@ -381,6 +404,8 @@ static lv_obj_t *g_settings_back_btn = NULL;
 static lv_obj_t *g_brightness_slider = NULL;
 static lv_obj_t *g_speed_slider = NULL;
 static lv_obj_t *g_speed_label = NULL;
+static lv_obj_t *g_ambient_slider = NULL;
+static lv_obj_t *g_ambient_label = NULL;
 
 // 按钮事件回调
 static void btn_settings_cb(lv_event_t *e)
@@ -453,6 +478,23 @@ static void slider_speed_cb(lv_event_t *e)
     if (label) {
         const char *speed_texts[] = {"0.5x", "1x", "2x", "4x", "8x"};
         lv_label_set_text_fmt(label, "Time: %s", speed_texts[val]);
+    }
+}
+
+static void slider_ambient_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = lv_event_get_target(e);
+    int val = lv_slider_get_value(slider);
+    struct game_context *ctx = engine_get_context();
+    if (ctx) {
+        ctx->save.ambient_timeout = (uint8_t)val;
+        engine_mark_dirty();
+    }
+
+    lv_obj_t *label = (lv_obj_t *)lv_event_get_user_data(e);
+    if (label) {
+        const char *ambient_texts[] = {"30s", "60s", "120s", "300s"};
+        lv_label_set_text_fmt(label, "Ambient: %s", ambient_texts[val]);
     }
 }
 
@@ -614,6 +656,18 @@ void ui_screen_settings_create(void)
     lv_obj_set_pos(g_speed_slider, 120, 230);
     lv_slider_set_range(g_speed_slider, 0, 4);
     lv_obj_add_event_cb(g_speed_slider, slider_speed_cb, LV_EVENT_VALUE_CHANGED, g_speed_label);
+
+    // 伴侣模式等待时间档位
+    g_ambient_label = lv_label_create(g_settings_screen);
+    lv_obj_set_pos(g_ambient_label, 20, 280);
+    lv_obj_set_style_text_color(g_ambient_label, lv_color_white(), 0);
+    lv_label_set_text(g_ambient_label, "Ambient: 60s");
+
+    g_ambient_slider = lv_slider_create(g_settings_screen);
+    lv_obj_set_size(g_ambient_slider, 200, 20);
+    lv_obj_set_pos(g_ambient_slider, 120, 280);
+    lv_slider_set_range(g_ambient_slider, 0, 3);
+    lv_obj_add_event_cb(g_ambient_slider, slider_ambient_cb, LV_EVENT_VALUE_CHANGED, g_ambient_label);
 }
 
 void ui_screen_settings_show(void)
@@ -632,6 +686,14 @@ void ui_screen_settings_show(void)
             const char *speed_texts[] = {"0.5x", "1x", "2x", "4x", "8x"};
             uint8_t idx = ctx->save.time_speed > 4 ? 1 : ctx->save.time_speed;
             lv_label_set_text_fmt(g_speed_label, "Time: %s", speed_texts[idx]);
+        }
+        if (g_ambient_slider) {
+            lv_slider_set_value(g_ambient_slider, ctx->save.ambient_timeout, LV_ANIM_OFF);
+        }
+        if (g_ambient_label) {
+            const char *ambient_texts[] = {"30s", "60s", "120s", "300s"};
+            uint8_t idx = ctx->save.ambient_timeout > 3 ? 1 : ctx->save.ambient_timeout;
+            lv_label_set_text_fmt(g_ambient_label, "Ambient: %s", ambient_texts[idx]);
         }
     }
 

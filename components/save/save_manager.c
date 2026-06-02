@@ -181,6 +181,7 @@ void save_gamesave_init_default(struct game_save *save)
 
     save->brightness = 255;
     save->time_speed = 1;  // 默认 1x
+    save->ambient_timeout = 1;  // 默认 60s
 
     // 计算 CRC
     save->crc32 = save_crc32(save, offsetof(struct game_save, crc32));

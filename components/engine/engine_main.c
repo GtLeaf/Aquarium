@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include <string.h>
+#include <stdlib.h>
 #include <time.h>
 
 static const char *TAG = "engine";
@@ -290,6 +291,21 @@ bool engine_upgrade_tank(struct game_save *save)
     save->photosynth_coins -= cost;
     save->tank_level++;
     ESP_LOGI(TAG, "Tank upgraded to L%d, cost=%lu", save->tank_level, (unsigned long)cost);
+
+    // 解锁该等级对应的物种
+    uint8_t new_level = save->tank_level;
+    for (int i = 0; i < MAX_SPECIES; i++) {
+        const struct species_def *sp = species_get_by_index(i);
+        if (!sp) continue;
+        // 匹配 "Unlock at tank level X" 格式
+        if (sp->unlock_desc && strncmp(sp->unlock_desc, "Unlock at tank level ", 21) == 0) {
+            int level_req = atoi(sp->unlock_desc + 21);
+            if (level_req <= new_level) {
+                engine_unlock_species(save, sp->id);
+            }
+        }
+    }
+
     engine_mark_dirty();
     return true;
 }
