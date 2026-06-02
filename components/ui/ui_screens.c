@@ -281,7 +281,9 @@ void ui_screen_main_update(const struct game_context *ctx)
     }
 
     // 生物色块：缓存属性，仅变化时更新 LVGL 对象
+    // 使用 creature_id 作为唯一标识，数组紧凑化后能精准识别错位
     static struct {
+        uint16_t creature_id;
         int16_t pos_x, pos_y;
         int16_t size;
         uint8_t trophic_level;
@@ -300,6 +302,12 @@ void ui_screen_main_update(const struct game_context *ctx)
             if (!sp) continue;
 
             lv_obj_t *obj = g_creature_objs[i];
+            // 如果 creature_id 不匹配，说明数组发生了紧凑化，需要重建对象
+            if (obj && creature_cache[i].creature_id != c->creature_id) {
+                lv_obj_del(obj);
+                obj = NULL;
+                g_creature_objs[i] = NULL;
+            }
             if (!obj) {
                 obj = lv_obj_create(g_tank_area);
                 lv_obj_set_style_radius(obj, LV_RADIUS_CIRCLE, 0);
@@ -311,6 +319,7 @@ void ui_screen_main_update(const struct game_context *ctx)
                 lv_obj_add_event_cb(obj, creature_long_press_cb, LV_EVENT_LONG_PRESSED, NULL);
                 g_creature_objs[i] = obj;
                 // 强制首帧刷新
+                creature_cache[i].creature_id = c->creature_id;
                 creature_cache[i].pos_x = -1;
                 creature_cache[i].pos_y = -1;
                 creature_cache[i].size = -1;
@@ -369,6 +378,9 @@ lv_obj_t* ui_get_main_screen(void)
 // ========== 设置界面 ==========
 static lv_obj_t *g_settings_screen = NULL;
 static lv_obj_t *g_settings_back_btn = NULL;
+static lv_obj_t *g_brightness_slider = NULL;
+static lv_obj_t *g_speed_slider = NULL;
+static lv_obj_t *g_speed_label = NULL;
 
 // 按钮事件回调
 static void btn_settings_cb(lv_event_t *e)
@@ -409,6 +421,38 @@ static void slider_temp_cb(lv_event_t *e)
     if (ctx) {
         ctx->save.env.temperature = (uint8_t)val;
         engine_mark_dirty();
+    }
+}
+
+static void slider_brightness_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = lv_event_get_target(e);
+    int val = lv_slider_get_value(slider);
+    struct game_context *ctx = engine_get_context();
+    if (ctx) {
+        // 保护：最低亮度 50，避免黑屏无法操作
+        if (val < 50) val = 50;
+        ctx->save.brightness = (uint8_t)val;
+        hal_display_set_brightness((uint8_t)val);
+        ESP_LOGI("ui", "Brightness set to %d", val);
+        engine_mark_dirty();
+    }
+}
+
+static void slider_speed_cb(lv_event_t *e)
+{
+    lv_obj_t *slider = lv_event_get_target(e);
+    int val = lv_slider_get_value(slider);
+    struct game_context *ctx = engine_get_context();
+    if (ctx) {
+        ctx->save.time_speed = (uint8_t)val;
+        engine_mark_dirty();
+    }
+
+    lv_obj_t *label = (lv_obj_t *)lv_event_get_user_data(e);
+    if (label) {
+        const char *speed_texts[] = {"0.5x", "1x", "2x", "4x", "8x"};
+        lv_label_set_text_fmt(label, "Time: %s", speed_texts[val]);
     }
 }
 
@@ -546,11 +590,51 @@ void ui_screen_settings_create(void)
     lv_obj_set_pos(temp_slider, 120, 130);
     lv_slider_set_range(temp_slider, 20, 30);
     lv_obj_add_event_cb(temp_slider, slider_temp_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // 亮度滑块
+    lv_obj_t *brightness_label = lv_label_create(g_settings_screen);
+    lv_obj_set_pos(brightness_label, 20, 180);
+    lv_obj_set_style_text_color(brightness_label, lv_color_white(), 0);
+    lv_label_set_text(brightness_label, "Brightness");
+
+    g_brightness_slider = lv_slider_create(g_settings_screen);
+    lv_obj_set_size(g_brightness_slider, 200, 20);
+    lv_obj_set_pos(g_brightness_slider, 120, 180);
+    lv_slider_set_range(g_brightness_slider, 0, 255);
+    lv_obj_add_event_cb(g_brightness_slider, slider_brightness_cb, LV_EVENT_VALUE_CHANGED, NULL);
+
+    // 时间流速档位
+    g_speed_label = lv_label_create(g_settings_screen);
+    lv_obj_set_pos(g_speed_label, 20, 230);
+    lv_obj_set_style_text_color(g_speed_label, lv_color_white(), 0);
+    lv_label_set_text(g_speed_label, "Time: 1x");
+
+    g_speed_slider = lv_slider_create(g_settings_screen);
+    lv_obj_set_size(g_speed_slider, 200, 20);
+    lv_obj_set_pos(g_speed_slider, 120, 230);
+    lv_slider_set_range(g_speed_slider, 0, 4);
+    lv_obj_add_event_cb(g_speed_slider, slider_speed_cb, LV_EVENT_VALUE_CHANGED, g_speed_label);
 }
 
 void ui_screen_settings_show(void)
 {
     if (!g_settings_screen) ui_screen_settings_create();
+
+    struct game_context *ctx = engine_get_context();
+    if (ctx) {
+        if (g_brightness_slider) {
+            lv_slider_set_value(g_brightness_slider, ctx->save.brightness, LV_ANIM_OFF);
+        }
+        if (g_speed_slider) {
+            lv_slider_set_value(g_speed_slider, ctx->save.time_speed, LV_ANIM_OFF);
+        }
+        if (g_speed_label) {
+            const char *speed_texts[] = {"0.5x", "1x", "2x", "4x", "8x"};
+            uint8_t idx = ctx->save.time_speed > 4 ? 1 : ctx->save.time_speed;
+            lv_label_set_text_fmt(g_speed_label, "Time: %s", speed_texts[idx]);
+        }
+    }
+
     lv_scr_load(g_settings_screen);
 }
 

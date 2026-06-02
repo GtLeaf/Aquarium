@@ -89,6 +89,8 @@ struct creature {
     uint8_t decel_frames;   // 减速阶段帧数: >0时正在减速, 0=正常速度
     uint16_t age_seconds;   // 存活时间(秒)
     uint16_t sleep_timer;   // 睡眠/死亡倒计时(秒)
+    uint8_t eat_timer;      // 进食倒计时(秒): >0时正在进食，不移动不觅食
+    uint8_t split_timer;    // L1分裂倒计时(秒): 保持最大体型后累计，达阈值分裂
     bool facing_right;      // 朝向
 };
 
@@ -125,6 +127,9 @@ struct game_save {
     uint8_t day_of_year;        // 当前日期 (用于每日重置)
 
     uint64_t achievements_unlocked; // 成就解锁位图
+
+    uint8_t brightness;    // 屏幕亮度 (0-255)
+    uint8_t time_speed;    // 游戏时间流速档位 (0=0.5x, 1=1x, 2=2x, 3=4x, 4=8x)
 };
 
 // 事件定义

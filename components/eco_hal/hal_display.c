@@ -30,6 +30,10 @@ static esp_lcd_panel_handle_t panel_handle = NULL;
 // SH8601 backlight is controlled via command 0x51
 #define PIN_LCD_BL      (-1)  // No GPIO backlight control
 
+// QSPI 写命令操作码（与 esp_lcd_sh8601.c 中的 LCD_OPCODE_WRITE_CMD 一致）
+#define LCD_OPCODE_WRITE_CMD    (0x02ULL)
+#define SH8601_CMD_BRIGHTNESS   (0x51)
+
 // SH8601 custom initialization commands for proper color format
 static const sh8601_lcd_init_cmd_t lcd_init_cmds[] = {
     // {cmd, { data }, data_size, delay_ms}
@@ -179,6 +183,21 @@ esp_err_t hal_display_init(void)
     return ESP_OK;
 }
 
+// 亮度调节延迟写入（避免与 LVGL flush 冲突）
+static volatile uint8_t s_pending_brightness = 0;
+static volatile bool s_brightness_pending = false;
+
+// 在 flush_cb 中执行实际的亮度写入（此时 QSPI 总线安全）
+static void hal_display_apply_brightness(void)
+{
+    if (s_brightness_pending && io_handle) {
+        s_brightness_pending = false;
+        uint8_t brightness = s_pending_brightness;
+        esp_err_t ret = esp_lcd_panel_io_tx_param(io_handle, 0x51, &brightness, 1);
+        ESP_LOGI(TAG, "Brightness applied: %d, ret=%s", brightness, esp_err_to_name(ret));
+    }
+}
+
 void hal_display_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_map)
 {
     int offsetx1 = area->x1;
@@ -188,13 +207,17 @@ void hal_display_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px
 
     esp_lcd_panel_draw_bitmap(panel_handle, offsetx1, offsety1, offsetx2 + 1, offsety2 + 1, px_map);
 
+    // 在刷新完成后应用待处理的亮度调节（避免 QSPI 总线冲突）
+    hal_display_apply_brightness();
+
     lv_display_flush_ready(disp);
 }
 
 void hal_display_set_brightness(uint8_t brightness)
 {
-    // SH8601 backlight is controlled via command 0x51
-    if (io_handle) {
-        esp_lcd_panel_io_tx_param(io_handle, 0x51, &brightness, 1);
-    }
+    // 不在此处直接发送 QSPI 命令，避免与 LVGL flush 冲突
+    // 改为标记待写入，由 hal_display_flush_cb 在刷新完成后执行
+    s_pending_brightness = brightness;
+    s_brightness_pending = true;
+    ESP_LOGI(TAG, "Brightness queued: %d", brightness);
 }

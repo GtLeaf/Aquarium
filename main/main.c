@@ -87,6 +87,12 @@ void app_main(void)
     ESP_ERROR_CHECK(engine_init());
     ESP_LOGI(TAG, "Engine OK");
 
+    // 应用存档中的屏幕亮度
+    struct game_context *ctx = engine_get_context();
+    if (ctx) {
+        hal_display_set_brightness(ctx->save.brightness);
+    }
+
     // 启动异步存档任务（低优先级，绑定 CPU1）
     save_manager_start_task();
 

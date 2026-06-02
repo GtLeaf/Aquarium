@@ -4,6 +4,7 @@
 #include "achievement_system.h"
 #include "save_manager.h"
 #include "hal_rtc.h"
+#include "hal_display.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include <string.h>
@@ -168,6 +169,12 @@ esp_err_t engine_init(void)
     s_ctx.state = STATE_TITLE;
     s_ctx.frame_count = 0;
     s_ctx.state_timer_ms = 0;
+
+    // 应用存档中的亮度设置（保护：最低亮度 50，避免黑屏）
+    uint8_t brightness = s_ctx.save.brightness;
+    if (brightness < 50) brightness = 50;
+    hal_display_set_brightness(brightness);
+    ESP_LOGI(TAG, "Brightness applied from save: %d (actual=%d)", s_ctx.save.brightness, brightness);
 
     // 初始化事件系统
     event_system_init(&s_event_state);
@@ -408,8 +415,9 @@ void engine_try_breed(struct game_save *save)
         }
         if (same_count >= sp->max_per_tank) continue;
 
-        // 30% 概率繁殖
-        if ((esp_random() % 100) < 30) {
+        // L2 繁殖成功率更高（80%），其他 30%
+        uint8_t breed_chance = (sp->trophic_level == TROPHIC_L2) ? 80 : 30;
+        if ((esp_random() % 100) < breed_chance) {
             uint16_t cid = engine_alloc_creature_id(save);
             if (cid == 0) {
                 ESP_LOGW(TAG, "Breed: creature ID exhausted, skip");
@@ -462,10 +470,13 @@ void engine_tick(void)
     // 物理位置更新：每帧执行（平滑运动）
     engine_physics_update(&s_ctx);
 
-    // 生态逻辑每 1 秒执行一次（1000ms / ENGINE_TICK_MS ≈ 62 帧）
+    // 生态逻辑根据 time_speed 档位调整执行间隔
+    // 档位: 0=0.5x(2000ms), 1=1x(1000ms), 2=2x(500ms), 3=4x(250ms), 4=8x(125ms)
+    static const uint16_t s_ecology_intervals[] = {2000, 1000, 500, 250, 125};
     static uint32_t ecology_timer = 0;
     ecology_timer += dt_ms;
-    if (ecology_timer >= 1000) {
+    uint8_t speed_idx = s_ctx.save.time_speed > 4 ? 1 : s_ctx.save.time_speed;
+    if (ecology_timer >= s_ecology_intervals[speed_idx]) {
         ecology_timer = 0;
         engine_logic_update(&s_ctx);
 

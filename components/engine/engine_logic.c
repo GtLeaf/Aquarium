@@ -70,13 +70,12 @@ static void update_environment(struct game_context *ctx)
         env->algae_mass = (uint8_t)(total_plant_size > 200 ? 100 : total_plant_size * 100 / 200);
     }
 
-    // §4.4 L1 植物生长：每分钟，根据 light_pref + nutrient 增长
+    // §4.4 L1 植物生长/分裂繁殖：每分钟，根据 light_pref + nutrient 增长或分裂
     if (env->total_seconds % 60 == 0) {
         for (int i = 0; i < ctx->save.creature_count; i++) {
             struct creature *plant = &ctx->save.creatures[i];
             const struct species_def *sp = species_get_by_id(plant->species_id);
             if (!sp || sp->trophic_level != TROPHIC_L1) continue;
-            if (plant->size >= sp->size_cap) continue;
 
             // 光照需求匹配
             bool light_ok = false;
@@ -96,20 +95,77 @@ static void update_environment(struct game_context *ctx)
                 default:          nut_ok = true; break;
             }
 
-            if (light_ok && nut_ok) {
-                // grow_factor 决定单次增长量
-                uint8_t growth = sp->grow_factor > 0 ? sp->grow_factor : 1;
-                if (plant->size + growth <= sp->size_cap) {
-                    plant->size += growth;
-                } else {
-                    plant->size = sp->size_cap;
+            if (!light_ok || !nut_ok) continue;
+
+            // ─── L1 体型已达最大值 → 累计分裂检查次数 ───
+            if (plant->size >= sp->size_cap) {
+                // 连续两次检查都维持最大体型，则标记为可分裂
+                if (plant->split_timer < 2) {
+                    plant->split_timer++;
                 }
-                // 消耗营养
-                uint8_t cost = (sp->nutrient_need == PREF_HIGH) ? 3 :
-                               (sp->nutrient_need == PREF_MEDIUM) ? 2 : 1;
-                if (env->nutrients >= cost) env->nutrients -= cost;
-                else env->nutrients = 0;
+                // 连续两次检查都达到最大体型，50%概率分裂
+                if (plant->split_timer >= 2 && (esp_random() % 100) < 50) {
+                    // 检查同种数量上限
+                    uint8_t same_count = 0;
+                    for (int k = 0; k < ctx->save.creature_count; k++) {
+                        if (ctx->save.creatures[k].species_id == plant->species_id) same_count++;
+                    }
+                    if (same_count >= sp->max_per_tank) {
+                        plant->split_timer = 0;
+                        continue;
+                    }
+                    if (ctx->save.creature_count >= MAX_CREATURES) {
+                        plant->split_timer = 0;
+                        continue;
+                    }
+
+                    // 消耗额外营养用于分裂
+                    if (env->nutrients < 5) {
+                        plant->split_timer = 0;
+                        continue;
+                    }
+
+                    // 分裂：原植物缩小，新植物诞生
+                    plant->size = sp->size_base; // 恢复基础大小
+                    plant->split_timer = 0;      // 重置分裂检查计数
+                    env->nutrients -= 3;
+
+                    struct creature *baby = &ctx->save.creatures[ctx->save.creature_count];
+                    memset(baby, 0, sizeof(*baby));
+                    extern uint16_t engine_alloc_creature_id(struct game_save *save);
+                    baby->creature_id = engine_alloc_creature_id(&ctx->save);
+                    baby->species_id = plant->species_id;
+                    baby->stage = STAGE_JUVENILE;
+                    baby->size = sp->size_base;
+                    baby->pos_x = plant->pos_x + (int8_t)((esp_random() % 20) - 10);
+                    baby->pos_y = plant->pos_y + (int8_t)((esp_random() % 20) - 10);
+                    baby->hunger = 0;
+                    baby->mood = sp->mood_base;
+                    baby->state = 0;
+                    baby->facing_right = (esp_random() % 2);
+                    ctx->save.creature_count++;
+                    ESP_LOGI(TAG, "L1 split: %s reproduced, count=%d", sp->name, same_count + 1);
+                    i++; // 跳过刚出生的个体（避免在同一帧内被再次处理）
+                    ctx->dirty = true;
+                }
+                continue;
+            } else {
+                // 未达最大体型，重置分裂检查计数
+                plant->split_timer = 0;
             }
+
+            // ─── L1 尚未达最大 → 正常生长 ───
+            uint8_t growth = sp->grow_factor > 0 ? sp->grow_factor : 1;
+            if (plant->size + growth <= sp->size_cap) {
+                plant->size += growth;
+            } else {
+                plant->size = sp->size_cap;
+            }
+            // 消耗营养
+            uint8_t cost = (sp->nutrient_need == PREF_HIGH) ? 3 :
+                           (sp->nutrient_need == PREF_MEDIUM) ? 2 : 1;
+            if (env->nutrients >= cost) env->nutrients -= cost;
+            else env->nutrients = 0;
         }
     }
 
@@ -161,7 +217,10 @@ static bool is_in_diet(const uint8_t diet[MAX_PREY_SLOTS], uint8_t species_id)
 // ─── L2 觅食：啃食 L1 植物实例 ───
 static void forage_l2(struct game_context *ctx, struct creature *c, const struct species_def *sp)
 {
-    if (c->hunger < 20) return; // 不太饿就不吃
+    if (c->hunger < 50) return; // 饥饿度<50时不觅食，提高阈值让L2更积极
+
+    // 正在进食中，不重新觅食
+    if (c->eat_timer > 0) return;
 
     int best_idx = -1;
     uint16_t best_dist = 255;
@@ -198,6 +257,11 @@ static void forage_l2(struct game_context *ctx, struct creature *c, const struct
 
         // 接触判定：距离 < 10 才啃食
         if (best_dist < 10) {
+            // 进入进食状态：停止移动，持续3秒（按游戏时间）
+            c->eat_timer = 3;
+            c->vel_x = 0;
+            c->vel_y = 0;
+
             // 啃食效果
             uint8_t relief = 5; // 基础饥饿缓解
             if (c->hunger >= relief) c->hunger -= relief;
@@ -434,23 +498,23 @@ static void forage_predator(struct game_context *ctx, struct creature *c, const 
             }
 
             // ─── 捕食成功 ───
-            // 捕食收益：按猎物体型计算
-            uint8_t relief = (prey->size / 3) + 5;
-            if (relief > 30) relief = 30;
+            // 捕食收益：按猎物体型计算（L2体型虽小但能量密度高）
+            uint8_t relief = (prey->size / 2) + 8;
+            if (relief > 35) relief = 35;
             if (c->hunger >= relief) c->hunger -= relief;
             else c->hunger = 0;
             c->growth_pts += 3;
 
             // 捕食者排泄回馈营养（模拟消化→排泄→被微生物分解）
-            // 回馈量 = 猎物体型 / 5，比猎物死亡释放少（部分被吸收）
-            uint8_t excrete = (prey->size / 5) + 1;
+            // 回馈量 = 猎物体型 / 3，提高营养循环效率
+            uint8_t excrete = (prey->size / 3) + 2;
             ctx->save.env.nutrients += excrete;
             if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
 
             // 猎物被吃 → 释放营养到环境
             const struct species_def *prey_sp = species_get_by_id(prey->species_id);
             if (prey_sp) {
-                uint8_t nut_release = prey_sp->size_base / 4;
+                uint8_t nut_release = prey_sp->size_base / 3;
                 ctx->save.env.nutrients += nut_release;
                 if (ctx->save.env.nutrients > 100) ctx->save.env.nutrients = 100;
             }
@@ -501,17 +565,26 @@ static void update_creatures(struct game_context *ctx)
             }
         }
 
+        // ─── 进食倒计时处理（按游戏时间递减，已随 time_speed 调整调用频率） ───
+        if (c->eat_timer > 0) {
+            c->eat_timer--;
+        }
+
         // ─── 逃跑AI（按索引错峰，每2秒周期内均匀分散） ───
-        if (c->state == 0 && ((c->age_seconds + i) % 2 == 0)) {
+        // 进食期间不逃跑
+        if (c->state == 0 && c->eat_timer == 0 && ((c->age_seconds + i) % 2 == 0)) {
             prey_flee(ctx, c, sp);
         }
 
         // ─── 觅食AI（按索引错峰，每3秒周期内均匀分散；饥饿>70时每秒执行） ───
+        // 进食期间不重新觅食
         bool forage_now = false;
-        if (c->hunger > 70) {
-            forage_now = true;  // 饥饿时每秒都觅食
-        } else {
-            forage_now = ((c->age_seconds + i) % 3 == 0);
+        if (c->eat_timer == 0) {
+            if (c->hunger > 70) {
+                forage_now = true;  // 饥饿时每秒都觅食
+            } else {
+                forage_now = ((c->age_seconds + i) % 3 == 0);
+            }
         }
         if (c->state == 0 && forage_now) {
             switch (sp->trophic_level) {
@@ -530,7 +603,8 @@ static void update_creatures(struct game_context *ctx)
 
         // ─── 随机游动（非追猎状态，停歇结束后重新出发） ───
         // vel==0 且 rest_frames==0 表示停歇刚结束，重新给予方向
-        if (c->state == 0 && c->vel_x == 0 && c->vel_y == 0 && c->rest_frames == 0 && c->decel_frames == 0) {
+        // 进食期间不随机游动
+        if (c->state == 0 && c->eat_timer == 0 && c->vel_x == 0 && c->vel_y == 0 && c->rest_frames == 0 && c->decel_frames == 0) {
             c->vel_x = (esp_random() % 2) ? 1 : -1;
             c->vel_y = (int8_t)((esp_random() % 3) - 1); // -1, 0, +1
             c->facing_right = (c->vel_x > 0);
@@ -868,6 +942,11 @@ void engine_physics_update(struct game_context *ctx)
 
         // ─── 判断是否处于加速状态（追猎/逃跑） ───
         bool is_accel = (c->vel_x > 1 || c->vel_x < -1 || c->vel_y > 1 || c->vel_y < -1);
+
+        // ─── 进食状态：倒计时中不移动 ───
+        if (c->eat_timer > 0) {
+            continue;
+        }
 
         // ─── 停歇状态：倒计时中不移动 ───
         if (c->rest_frames > 0) {

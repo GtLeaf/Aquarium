@@ -4,6 +4,7 @@
 #include "engine_main.h"
 #include "event_system.h"
 #include "achievement_system.h"
+#include "save_manager.h"
 #include "hal_audio.h"
 #include "hal_lvgl.h"
 #include "esp_log.h"
@@ -185,13 +186,20 @@ void ui_navigate_home(void)
     if (g_shop_grid) lv_obj_clean(g_shop_grid);
     if (g_collection_grid) lv_obj_clean(g_collection_grid);
 
+    // 从设置页面返回时，立即存档当前设置
+    struct game_context *ctx = engine_get_context();
+    if (ctx && ctx->dirty) {
+        save_gamesave_write(&ctx->save);
+        ESP_LOGI("ui", "Settings saved on exit");
+        ctx->dirty = false;
+    }
+
     lv_obj_t *main = ui_get_main_screen();
     if (main) {
         lv_scr_load(main);
     }
 
     // 立即刷新一帧主界面（让新购入的生物马上显示）
-    struct game_context *ctx = engine_get_context();
     if (ctx) {
         ui_screen_main_update(ctx);
     }

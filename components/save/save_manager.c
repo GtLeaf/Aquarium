@@ -179,6 +179,9 @@ void save_gamesave_init_default(struct game_save *save)
     save->today_events = 0;
     save->day_of_year = 0;
 
+    save->brightness = 255;
+    save->time_speed = 1;  // 默认 1x
+
     // 计算 CRC
     save->crc32 = save_crc32(save, offsetof(struct game_save, crc32));
 }
@@ -228,6 +231,11 @@ static void save_migrate(struct game_save *save, uint32_t old_version)
     if (old_version < 3) {
         // v1/v2 -> v3: 新增 achievements_unlocked 字段
         save->achievements_unlocked = 0;
+    }
+    if (old_version < 4) {
+        // v3 -> v4: 新增 brightness 和 time_speed 字段
+        save->brightness = 255;
+        save->time_speed = 1;
     }
 
     save->version = SAVE_VERSION;
